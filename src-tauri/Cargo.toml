@@ -13,10 +13,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = [] }
+tauri = { version = "2.11", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-dialog = "2.7"
 tauri-plugin-opener = "2.5"
 tauri-plugin-store = "2.4"
+tauri-plugin-global-shortcut = "2.3"
+tauri-plugin-autostart = "2.5"
+tauri-plugin-single-instance = "2.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Lossy WebP: bindings to Google's libwebp, compiled from source and linked
@@ -26,10 +29,16 @@ webp = "0.3"
 fast_image_resize = "6"
 rayon = "1"
 unicode-normalization = "0.1"
+base64 = "0.22"
 
 # Decoding (JPG/PNG/HEIC/TIFF) goes through macOS ImageIO: native HEIC support,
 # EXIF orientation and colour management into sRGB.
 [target.'cfg(target_os = "macos")'.dependencies]
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+window-vibrancy = "0.6"
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-quartz-core = "0.3"
 objc2-core-foundation = "0.3"
 objc2-core-graphics = "0.3"
 objc2-image-io = "0.3"

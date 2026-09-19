@@ -1,12 +1,23 @@
+mod corners;
 pub mod imageio;
 mod naming;
+mod panel;
 pub mod pipeline;
+mod settings;
+mod shortcut;
 mod sizes;
+mod tray;
+mod windows;
 
 use std::path::{Path, PathBuf};
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use serde_json::json;
+use tauri::{ActivationPolicy, AppHandle, Emitter, Manager as _, WindowEvent};
+
+use settings::AppSettings;
 
 use pipeline::BatchResult;
 
@@ -17,6 +28,7 @@ struct ImageInfo {
     name: String,
     width: u32,
     height: u32,
+    bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -79,6 +91,7 @@ async fn inspect_images(paths: Vec<String>) -> InspectResult {
             };
             match checked {
                 Ok((width, height)) => result.images.push(ImageInfo {
+                    bytes: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
                     path,
                     name,
                     width,
@@ -164,9 +177,153 @@ async fn process_images(
     .map_err(|e| e.to_string())?
 }
 
+/// A small WebP preview of the source image, as a data URL for the panel.
+#[tauri::command]
+async fn thumbnail(path: String, size: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bitmap = imageio::decode_thumbnail(Path::new(&path), size.max(16) * 2)?;
+        let encoded = pipeline::encode_within_limit(
+            bitmap.pixels,
+            bitmap.width,
+            bitmap.height,
+            bitmap.has_alpha,
+            None,
+        )?;
+        Ok(format!(
+            "data:image/webp;base64,{}",
+            STANDARD.encode(encoded.data)
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn app_settings(app: AppHandle) -> AppSettings {
+    settings::get(&app)
+}
+
+#[tauri::command]
+fn shortcut_label(accelerator: String) -> String {
+    settings::pretty_shortcut(&accelerator)
+}
+
+/// Swaps the global shortcut; on failure the old one stays registered.
+#[tauri::command]
+fn set_shortcut(app: AppHandle, accelerator: String) -> Result<(), String> {
+    shortcut::replace(&app, &accelerator)
+}
+
+#[tauri::command]
+fn set_show_in_dock(app: AppHandle, show: bool) {
+    settings::set(&app, "showInDock", json!(show));
+    apply_activation_policy(&app, show);
+}
+
+#[tauri::command]
+fn set_default_target(app: AppHandle, target: String) {
+    settings::set(&app, "defaultTarget", json!(target));
+    let _ = app.emit("preen://settings-changed", ());
+}
+
+#[tauri::command]
+fn remember_target(app: AppHandle, path: String) {
+    settings::remember_target(&app, &path);
+}
+
+/// A stored folder that has gone missing (or turned read-only) must not break
+/// a run, so the caller silently falls back to "source".
+#[tauri::command]
+fn target_is_usable(path: String) -> bool {
+    let path = Path::new(&path);
+    path.is_dir()
+        && !std::fs::metadata(path)
+            .map(|m| m.permissions().readonly())
+            .unwrap_or(true)
+}
+
+#[tauri::command]
+fn show_panel(app: AppHandle) {
+    panel::show(&app);
+}
+
+#[tauri::command]
+fn hide_panel(app: AppHandle) {
+    panel::hide(&app);
+}
+
+/// Resizes the panel. `animate` is used for the drop transition only.
+#[tauri::command]
+fn resize_panel(app: AppHandle, height: f64, loaded: bool, animate: bool) {
+    let (width, radius) = if loaded {
+        (panel::LOADED_WIDTH, panel::LOADED_RADIUS)
+    } else {
+        (panel::IDLE_SIZE.0, panel::IDLE_RADIUS)
+    };
+    panel::resize(&app, width, height, radius, animate);
+}
+
+/// Hover and drag-over emphasis for the resting tile.
+#[tauri::command]
+fn emphasize_panel(app: AppHandle, scale: f64) {
+    panel::emphasize(&app, scale);
+}
+
+/// Hiding a window from the frontend needs a window permission; going through
+/// a command does not, which keeps the close button working no matter what the
+/// capability file says.
+#[tauri::command]
+fn hide_settings(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(windows::SETTINGS_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+#[tauri::command]
+fn set_auto_hide_seconds(app: AppHandle, seconds: u64) {
+    settings::set(&app, "autoHideSeconds", json!(seconds));
+    let _ = app.emit("preen://settings-changed", ());
+}
+
+#[tauri::command]
+fn open_settings_window(app: AppHandle) {
+    windows::open_settings(&app);
+}
+
+#[tauri::command]
+fn resize_settings_window(app: AppHandle, height: f64) {
+    windows::resize_settings(&app, height);
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+fn apply_activation_policy(app: &AppHandle, show_in_dock: bool) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        let _ = app.set_activation_policy(if show_in_dock {
+            ActivationPolicy::Regular
+        } else {
+            ActivationPolicy::Accessory
+        });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch just brings the running panel up.
+            panel::show(app);
+        }))
+        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -174,8 +331,63 @@ pub fn run() {
             inspect_images,
             suggest_slug,
             preview_output,
-            process_images
+            process_images,
+            thumbnail,
+            app_settings,
+            shortcut_label,
+            set_shortcut,
+            set_show_in_dock,
+            set_default_target,
+            remember_target,
+            target_is_usable,
+            show_panel,
+            hide_panel,
+            resize_panel,
+            emphasize_panel,
+            hide_settings,
+            set_auto_hide_seconds,
+            open_settings_window,
+            resize_settings_window,
+            quit_app
         ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let stored = settings::get(&handle);
+            // Set on the App itself during setup: this is what takes the app
+            // out of the Dock *and* the menu bar. The Info.plist LSUIElement
+            // flag does the same for the bundled app before it even launches.
+            app.set_activation_policy(if stored.show_in_dock {
+                ActivationPolicy::Regular
+            } else {
+                ActivationPolicy::Accessory
+            });
+
+            panel::create(&handle)?;
+            tray::create(&handle)?;
+            shortcut::register_stored(&handle);
+
+            // After installation the app would otherwise look like it never
+            // started, so the panel shows itself once. A background tool is
+            // also expected to come back after a restart.
+            if settings::take_first_run(&handle) {
+                use tauri_plugin_autostart::ManagerExt;
+                let _ = handle.autolaunch().enable();
+                panel::show(&handle);
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            // Closing a window hides it; quitting happens from the tray only.
+            WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            // Remember where the user dragged the panel.
+            WindowEvent::Moved(_) if window.label() == panel::PANEL_LABEL => {
+                panel::remember_position(window.app_handle());
+            }
+            _ => {}
+        })
         .run(tauri::generate_context!())
         .expect("error while running Preen");
 }

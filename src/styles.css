@@ -1,79 +1,153 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #faf9f7;
-  --color-fg: #1c1b19;
-  --color-muted: #6b6862;
-  --color-faint: #a19d95;
-  --color-line: #e3e0da;
-  --color-field: #ffffff;
-  --color-accent: #50988d;
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
-}
+  /* Ink */
+  --color-ink: #0f2c2b;
+  --color-ink-2: #4a6b69;
+  --color-ink-3: #7d9995;
+  /* Accent surfaces need 4.5:1 against white, which #50988d misses. */
+  --color-accent: #2e6d63;
+  --color-feather: #50988d;
+  /* Quiet surfaces and hairlines, tinted with the ink */
+  --color-quiet: rgba(15, 44, 43, 0.06);
+  --color-quieter: rgba(15, 44, 43, 0.07);
+  --color-hairline: rgba(15, 44, 43, 0.12);
+  --color-hair-soft: rgba(15, 44, 43, 0.09);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #1b1b1a;
-    --color-fg: #ecebe8;
-    --color-muted: #a29f98;
-    --color-faint: #6d6a65;
-    --color-line: #34332f;
-    --color-field: #242422;
-    --color-accent: #5fa89c;
-  }
+  --font-sans: system-ui, -apple-system, "SF Pro Text", sans-serif;
 }
 
 html,
-body {
-  background: var(--color-bg);
-  color: var(--color-fg);
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   cursor: default;
+  user-select: none;
+  overflow: hidden;
 }
 
-input,
-textarea {
+input {
   user-select: text;
+  font-family: inherit;
 }
 
 button:not(:disabled) {
   cursor: default;
 }
 
-@utility btn-quiet {
-  border-radius: 0.375rem;
-  padding: 0.25rem 0.5rem;
-  color: var(--color-accent);
-  font-weight: 500;
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+/* The window itself is the glass body: NSVisualEffectView blurs the desktop
+   behind it (CSS backdrop-filter could only blur the webview's own content),
+   and these layers sit on top of that blur. */
+/* No fixed height: the settings window is as tall as its content, and the
+   panel asks for h-full itself. */
+@utility glass-body {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.56));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 26px 60px rgba(6, 22, 26, 0.42),
+    0 3px 10px rgba(6, 22, 26, 0.2);
+}
+
+/* The settings window keeps a denser surface than the panel: its text has to
+   stay readable over a busy desktop. */
+
+@utility hairline {
+  height: 1px;
+  background: var(--color-hair-soft);
+}
+
+@utility label-caps {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+/* Popovers only fade; nothing in this app slides or bounces except the two
+   moments the design calls for. */
+@utility pop {
+  animation: pop-in 140ms ease-out;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
   }
-  &:disabled {
-    opacity: 0.4;
+  to {
+    opacity: 1;
   }
 }
 
-@utility field-label {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-muted);
+/* The drop: content arrives just after the window has started growing. */
+@utility content-in {
+  animation: content-in 260ms ease-out 90ms both;
 }
 
-@utility input-box {
+@keyframes content-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Done: the check pops once. */
+@utility check-in {
+  animation: check-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 140ms both;
+}
+
+@keyframes check-in {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Sliders: 5px track, filled part in the accent, 15px white knob. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  border-radius: 0.5rem;
-  border: 1px solid var(--color-line);
-  background: var(--color-field);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  outline: none;
-  &::placeholder {
-    color: var(--color-faint);
-  }
-  &:focus {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
-  }
+  height: 15px;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--range-track, rgba(15, 44, 43, 0.16));
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 1px 4px rgba(6, 22, 26, 0.4),
+    inset 0 0 0 1px rgba(15, 44, 43, 0.12);
 }

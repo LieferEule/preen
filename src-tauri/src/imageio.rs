@@ -43,13 +43,23 @@ pub fn dimensions(path: &Path) -> Result<(u32, u32), String> {
 }
 
 pub fn decode(path: &Path) -> Result<Bitmap, String> {
+    decode_capped(path, None)
+}
+
+/// Decodes at most `max_pixels` on the longer side — for panel previews.
+pub fn decode_thumbnail(path: &Path, max_pixels: u32) -> Result<Bitmap, String> {
+    decode_capped(path, Some(max_pixels))
+}
+
+fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String> {
     let source = open(path)?;
     let (width, height, _) = raw_properties(&source)?;
 
     // A "thumbnail" at the full pixel size is the documented way to get
     // ImageIO to apply the EXIF orientation while decoding.
     let yes = CFBoolean::new(true);
-    let max_size = CFNumber::new_i64(width.max(height) as i64);
+    let longest = width.max(height);
+    let max_size = CFNumber::new_i64(max_pixels.map_or(longest, |cap| cap.min(longest)) as i64);
     let options = CFDictionary::<CFString, CFType>::from_slices(
         &[
             unsafe { kCGImageSourceCreateThumbnailFromImageAlways },
