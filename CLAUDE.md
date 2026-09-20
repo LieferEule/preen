@@ -1,0 +1,58 @@
+# Preen
+
+Lokale macOS-App, Bilder werden web-fertig als WebP ausgegeben.
+Tauri v2, Rust-Backend, React/TypeScript/Tailwind, Bun.
+
+## Design
+design/panel-reference.html ist verbindlich: Farben, Maße, Radien,
+Abstände, Schriftgrößen, Zeiten und Kurven. Nicht aus Screenshots raten.
+Akzentflächen #2e6d63, Feder #50988d.
+
+## Panelgeometrie
+Feste Höhe je Zustand, an einer Stelle definiert. Keine dynamische
+Höhenmessung, kein ResizeObserver.
+Ruhe 184, ein Bild 381, mehrere Bilder 403, fertig 258.
+Der Drop-Zustand ändert die Höhe nicht, er liegt als Overlay darüber.
+overflow: hidden auf html, body und #root; dazu preventScroll beim
+Fokus. Beides muss bleiben, sonst scrollt der Webview die Kopfzeile raus.
+Für Geometrie offsetHeight benutzen, nie getBoundingClientRect, das
+misst laufende Transforms mit (scale(0.96) ergab 15 px zu wenig).
+Fenstergröße nur über frame::set_size setzen, nie in Schleifen aus
+einem Thread; der Webview hinkt sonst nach und es entsteht ein grauer
+Streifen.
+Im Debug-Build prüft eine Zusicherung die natürliche Inhaltshöhe gegen
+den Sollwert. Nach jeder Layoutänderung einmal im Debug-Build durch
+alle Zustände schalten, F8 schaltet den Drop-Zustand um.
+
+## macOS und Tauri, bekannte Fallen
+AppKit nur im Hauptthread. Shortcut, Tray und Zweitstart müssen
+panel::show über run_on_main_thread aufrufen, sonst Absturz.
+core:default erlaubt keine Fensteränderungen wie hide oder
+start_dragging: entweder Berechtigung eintragen oder einen eigenen
+Rust-Befehl nehmen. data-tauri-drag-region zieht nur bei direktem
+Treffer, also "deep" oder eine eigene Ebene.
+tauri build --debug baut das Frontend trotzdem produktiv. Debug-Code
+über TAURI_ENV_DEBUG bzw. __PREEN_DEBUG__ schalten.
+JS- und Rust-Version eines Plugins müssen zusammenpassen, sonst
+bricht der Build ab.
+
+## Tailwind
+Eigene Utilities verlieren gegen die Klassenreihenfolge, Panel-Zustände
+stehen deshalb als Inline-Stil. Klassennamen nicht so wählen, dass sie
+mit Tailwind kollidieren (text-field kollidierte mit text-{farbe} und
+ergab weiß auf weiß).
+
+## Arbeitsweise
+Erst messen, dann ändern. Eigene Logs sind kein Beweis, wenn es ums
+Aussehen geht: screencapture -x machen und im Bild nachsehen.
+Du kannst die App nicht bedienen: keine Finder-Drags, keine Klicks
+(System Events −25208). Einzelne Fenster abfotografieren geht nicht,
+Vollbild schon. Tastendrücke gehen über osascript key code. Bilder
+kommen per open -n -a Preen.app --args <bild> hinein, Enter startet
+die Verarbeitung.
+Was ohne GUI prüfbar ist, über preen-cli prüfen. Wenn etwas wirklich
+einen Klick braucht, anhalten und genau sagen, was zu tun ist, statt in
+einer Schleife weiterzuversuchen.
+Erst testen, dann committen, und am Ende jedes Schrittes committen,
+nicht erst am Ende der Etappe. Nicht von selbst committen.
+Autor: LieferEule <206203779+LieferEule@users.noreply.github.com>
