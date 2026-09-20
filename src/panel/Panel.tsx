@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Switch } from "../components/Switch";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { desktopDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -34,6 +35,8 @@ import {
   targetIsUsable,
   thumbnail,
   type BatchResult,
+  type ImageResult,
+  type Rejected,
   type ImageInfo,
   type Target,
 } from "../lib/api";
@@ -60,7 +63,11 @@ const LOADED_WIDTH = 340;
  * the window ended up shorter than the card. Nothing else may change the
  * height: a file hovering over the panel only lights a ring (see DROP_RING).
  */
-const HEIGHTS = { idle: 184, one: 381, many: 403, done: 258 };
+// Gemessen im Debug-Build, nicht gerechnet: neben das 60 px hohe
+// Vorschaubild passen drei Textzeilen ohne dass etwas wächst. Die vierte —
+// der zweite Fehlschlag mit Namen und Grund — kostet 16 px, und die stehen
+// hier. Nach jeder Layoutänderung neu nachsehen, was die Zusicherung sagt.
+const HEIGHTS = { idle: 184, one: 381, many: 403, done: 258, doneErrors: 274 };
 /** How long the panel takes to open after a drop. */
 const GROW_MS = 480;
 /** ... and to fold back up. */
@@ -98,6 +105,7 @@ interface Limits {
   maxMegapixels: number;
   minLongEdge: number;
   maxKb: number;
+  overwrite: boolean;
   overridden: boolean;
 }
 
@@ -109,6 +117,8 @@ export default function Panel() {
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [longEdge, setLongEdge] = useState(PRESETS[0].longEdge);
   const [maxKb, setMaxKb] = useState(PRESETS[0].maxKb);
+  // Destructive, so it never carries over: off again for every new drop.
+  const [overwrite, setOverwrite] = useState(false);
   const [target, setTarget] = useState<Target>(TARGET_SOURCE);
   const [recent, setRecent] = useState<string[]>([]);
   const [targetNote, setTargetNote] = useState<string | null>(null);
@@ -118,6 +128,9 @@ export default function Panel() {
   const [dragging, setDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [autoHideSeconds, setAutoHideSeconds] = useState(0);
+  // Beim Ablegen aussortierte Dateien. Steht, bis der Nutzer etwas tut —
+  // nichts verschwindet lautlos, und kein Timer, den man verpassen kann.
+  const [rejected, setRejected] = useState<Rejected[]>([]);
   // Bumped by anything that counts as "the user is here".
   const [activity, setActivity] = useState(0);
 
@@ -137,7 +150,8 @@ export default function Panel() {
     maxMegapixels: preset.maxMegapixels,
     minLongEdge: preset.minLongEdge,
     maxKb,
-    overridden: longEdge !== preset.longEdge || maxKb !== preset.maxKb,
+    overwrite,
+    overridden: longEdge !== preset.longEdge || maxKb !== preset.maxKb || overwrite,
   };
   const loaded = images.length > 0;
 
@@ -168,7 +182,9 @@ export default function Panel() {
   // ---- files -------------------------------------------------------------
   const addPaths = useCallback(async (paths: string[]) => {
     if (busyRef.current || paths.length === 0) return;
-    const { images: found } = await inspectImages(paths);
+    const { images: found, rejected: turnedDown } = await inspectImages(paths);
+    setRejected(turnedDown);
+    // Auch wenn nichts übrig bleibt: die Ruhe-Ansicht sagt dann, was weg ist.
     if (found.length === 0) return;
     setPhase({ kind: "loaded" });
     setImages((current) => {
@@ -206,6 +222,7 @@ export default function Panel() {
     const unlisten = onPanelShown(() => {
       setHovered(false);
       setActivity((n) => n + 1);
+      setRejected([]);
       slugInput.current?.focus({ preventScroll: true });
       // The window may have been left at a stale size; state it again.
       resizePanel(heightRef.current, phaseRef.current !== "idle", 0);
@@ -301,6 +318,7 @@ export default function Panel() {
         sizes: images.map((i) => [i.width, i.height] as [number, number]),
         longEdge: limits.longEdge,
         maxMegapixels: limits.maxMegapixels,
+        overwrite: limits.overwrite,
         customOutputDir: custom,
       });
       if (!stale) setOutputDir(result.outputDir);
@@ -308,7 +326,15 @@ export default function Panel() {
     return () => {
       stale = true;
     };
-  }, [images, slug, limits.longEdge, limits.maxMegapixels, resolveTarget, loaded]);
+  }, [
+    images,
+    slug,
+    limits.longEdge,
+    limits.maxMegapixels,
+    limits.overwrite,
+    resolveTarget,
+    loaded,
+  ]);
 
   const chooseFolder = async () => {
     const dir = await open({ directory: true });
@@ -321,6 +347,7 @@ export default function Panel() {
   };
 
   const pickPreset = (p: Preset) => {
+    setRejected([]);
     setPreset(p);
     setLongEdge(p.longEdge);
     setMaxKb(p.maxKb);
@@ -330,6 +357,7 @@ export default function Panel() {
   // ---- run ---------------------------------------------------------------
   const run = async () => {
     if (!loaded || busy) return;
+    setRejected([]);
     setPopover(null);
     setPhase({ kind: "processing", done: 0, total: images.length });
     try {
@@ -343,9 +371,20 @@ export default function Panel() {
           maxMegapixels: limits.maxMegapixels,
           minLongEdge: limits.minLongEdge,
           maxKb: limits.maxKb,
+          overwrite: limits.overwrite,
         },
       });
       const sourceBytes = images.reduce((sum, i) => sum + (i.bytes ?? 0), 0);
+      // Ohne eine einzige fertige Datei gibt es nichts zu zeigen: dann ist
+      // der Lauf fehlgeschlagen und nicht "fertig".
+      if (!result.images.some((i) => i.output)) {
+        const first = result.images.find((i) => i.error)?.error ?? "Nichts verarbeitet";
+        setPhase({
+          kind: "failed",
+          message: result.images.length > 1 ? `Keine der ${result.images.length} Dateien: ${first}` : first,
+        });
+        return;
+      }
       setPhase({ kind: "done", result, maxKb: limits.maxKb, sourceBytes });
     } catch (e) {
       setPhase({ kind: "failed", message: String(e) });
@@ -353,12 +392,14 @@ export default function Panel() {
   };
 
   const startOver = () => {
+    setRejected([]);
     setImages([]);
     setPreview(null);
     setSlugTouched(false);
     setSlug("");
     setLongEdge(preset.longEdge);
     setMaxKb(preset.maxKb);
+    setOverwrite(false);
     setPopover(null);
     grewOnce.current = false;
     setPhase({ kind: "idle" });
@@ -371,7 +412,7 @@ export default function Panel() {
     phase.kind === "idle"
       ? HEIGHTS.idle
       : phase.kind === "done"
-        ? HEIGHTS.done
+        ? doneHeight(phase.result)
         : images.length > 1
           ? HEIGHTS.many
           : HEIGHTS.one;
@@ -388,6 +429,11 @@ export default function Panel() {
       // The card is told its height, so comparing it with itself proves
       // nothing: what matters is what the content inside actually needs.
       setTimeout(() => {
+        // Der Zustand kann weitergelaufen sein, bevor gemessen wird — vier
+        // kleine Bilder sind in unter 600 ms durch. Dann gälte die Messung
+        // einem Layout, das es nicht mehr gibt. Lieber schweigen als falsch
+        // schimpfen: eine Zusicherung, die man wegliest, ist keine.
+        if (phaseRef.current !== phase.kind || heightRef.current !== panelHeight) return;
         const inner = document.getElementById("panel-content");
         const actual = inner ? inner.offsetHeight : HEIGHTS.idle;
         if (actual !== panelHeight) {
@@ -487,9 +533,18 @@ export default function Panel() {
               transition: "transform 180ms var(--ease-enter), color 180ms var(--ease-ui)",
             }}
           />
-          <p className="text-[12px] font-medium tracking-[0.01em] text-[#40635f]">
-            {dragging ? "Loslassen" : "Bild hierher ziehen"}
-          </p>
+          {rejected.length > 0 && !dragging ? (
+            <p
+              className="px-5 text-center text-[12px] font-medium tracking-[0.01em] text-balance text-[var(--color-over)]"
+              title={rejectionTitle(rejected)}
+            >
+              {rejectionLine(rejected)}
+            </p>
+          ) : (
+            <p className="text-[12px] font-medium tracking-[0.01em] text-[#40635f]">
+              {dragging ? "Loslassen" : "Bild hierher ziehen"}
+            </p>
+          )}
         </div>
       ) : (
         <div id="panel-content" className="content-in flex flex-col gap-[14px] p-4">
@@ -562,6 +617,13 @@ export default function Panel() {
                 {phase.kind === "failed" ? (
                   <p className="truncate pl-1 text-[11px] text-[var(--color-over)]" title={phase.message}>
                     {phase.message}
+                  </p>
+                ) : rejected.length > 0 ? (
+                  <p
+                    className="truncate pl-1 text-[11px] text-[var(--color-over)]"
+                    title={rejectionTitle(rejected)}
+                  >
+                    {rejectionLine(rejected)}
                   </p>
                 ) : (
                 <p className="truncate pl-1 text-[11px] text-[var(--color-ink-2)] tabular-nums">
@@ -678,7 +740,7 @@ export default function Panel() {
                   />
                 </Popover>
 
-                <Popover open={popover === "fine"} width={232} align="right" label="Feineinstellung">
+                <Popover open={popover === "fine"} width={252} align="right" label="Feineinstellung">
                   <div className="space-y-3 p-3">
                     <Slider
                       label="Lange Kante"
@@ -694,11 +756,23 @@ export default function Panel() {
                       value={limits.maxKb}
                       onChange={setMaxKb}
                     />
+                    <label className="flex cursor-pointer items-center justify-between gap-2">
+                      <span className="text-[12px] font-medium text-[var(--color-ink-2)]">
+                        Bestehende Dateien ersetzen
+                      </span>
+                      <Switch
+                        compact
+                        checked={limits.overwrite}
+                        label="Bestehende Dateien ersetzen"
+                        onChange={setOverwrite}
+                      />
+                    </label>
                     <div className="hairline" />
                     <button
                       onClick={() => {
                         setLongEdge(preset.longEdge);
                         setMaxKb(preset.maxKb);
+                        setOverwrite(false);
                       }}
                       className="pressable w-full text-left text-[12px] font-semibold text-[var(--color-accent)]"
                     >
@@ -785,6 +859,54 @@ function Header(props: {
       </button>
     </div>
   );
+}
+
+const sourceName = (path: string) => path.split("/").pop() ?? path;
+
+/**
+ * What was turned down at the drop, in one line. The panel filters before it
+ * loads anything, which is right — but then it has to say so, or files
+ * disappear without a word.
+ *
+ * One file gets its reason; several get their names, because in 340 px the
+ * names are what lets you go and look. The reasons are in the tooltip, and
+ * the line is never the only place the information exists.
+ */
+function rejectionLine(rejected: Rejected[]): string {
+  if (rejected.length === 1) return `${rejected[0].name} — ${rejected[0].reason}`;
+  return `${rejected.length} nicht angenommen: ${rejected.map((r) => r.name).join(", ")}`;
+}
+
+const rejectionTitle = (rejected: Rejected[]) =>
+  rejected.map((r) => `${r.name} — ${r.reason}`).join("\n");
+
+/**
+ * One line for what did not work. Up to two files are named with their
+ * reason; beyond that a collected line, because the third would push the
+ * panel past its fixed height. The full list is in the tooltip.
+ */
+/**
+ * What did not work, in at most two lines.
+ *
+ * One or two files are named with their reason — that is what the extra
+ * 16 px of `doneErrors` are for. From three on the count and the reason lead,
+ * but the names still stand on the second line: a collected line whose
+ * content only lives in a tooltip is a hiding place.
+ */
+function failureLines(failed: ImageResult[]): string[] {
+  const entry = (f: ImageResult) => `${sourceName(f.source)} — ${f.error}`;
+  if (failed.length <= 2) return failed.map(entry);
+  const reasons = [...new Set(failed.map((f) => f.error))];
+  const head =
+    reasons.length === 1
+      ? `${failed.length} nicht verarbeitet — ${reasons[0]}`
+      : `${failed.length} nicht verarbeitet`;
+  return [head, failed.map((f) => sourceName(f.source)).join(", ")];
+}
+
+/** Failures need a second line as soon as there are two of them. */
+function doneHeight(result: BatchResult): number {
+  return result.images.filter((i) => i.error).length >= 2 ? HEIGHTS.doneErrors : HEIGHTS.done;
 }
 
 function Thumb({
@@ -969,15 +1091,31 @@ function Done(props: {
 
   return (
     <>
+      {/* Drei Zeilen passen neben das 60 px hohe Vorschaubild, ohne dass der
+          Block wächst — deshalb steht der Teilerfolg hier und nicht unter
+          der Karte, wo er die feste Panelhöhe sprengen würde. */}
       <div className="flex items-center gap-3">
-        <Thumb src={props.preview} badge over={!!worst} />
+        <Thumb src={props.preview} badge over={!!worst || failed.length > 0} />
         <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <p className="truncate text-[13px] font-semibold">
-            {many ? `${files.length} Dateien` : first?.fileName}
+            {failed.length > 0
+              ? `${files.length} von ${result.images.length} fertig`
+              : many
+                ? `${files.length} Dateien`
+                : first?.fileName}
           </p>
-          <p className="text-[11px] text-[var(--color-ink-2)] tabular-nums">
+          <p className="truncate text-[11px] text-[var(--color-ink-2)] tabular-nums">
             {first && `${first.width} × ${first.height} px · ${quality}`}
           </p>
+          {failureLines(failed).map((line) => (
+            <p
+              key={line}
+              className="truncate text-[11px] text-[var(--color-over)]"
+              title={failed.map((f) => `${sourceName(f.source)} — ${f.error}`).join("\n")}
+            >
+              {line}
+            </p>
+          ))}
         </div>
       </div>
 
@@ -1056,12 +1194,6 @@ function Done(props: {
           </div>
         )}
       </div>
-
-      {failed.length > 0 && (
-        <p className="text-[11px] text-[var(--color-over)]">
-          {failed.length === 1 ? "1 Bild" : `${failed.length} Bilder`} konnten nicht verarbeitet werden.
-        </p>
-      )}
 
       <div className="flex gap-2">
         <button

@@ -34,6 +34,8 @@ pub const SUPPORTED_EXTENSIONS: [&str; 8] =
 /// Images decoded at the same time. A 48 MP photo takes ~200 MB as RGBA,
 /// so this is kept small on purpose.
 const MAX_PARALLEL_IMAGES: usize = 3;
+/// How far `name-2.webp`, `name-3.webp` … is tried before giving up.
+const MAX_NAME_ATTEMPTS: u32 = 999;
 
 /// Last resort when even [`QUALITY_FLOOR`] misses the size limit: shrink the
 /// long edge by this much and bisect again.
@@ -53,6 +55,9 @@ pub struct Settings {
     pub min_long_edge: u32,
     /// Upper file size in bytes; `None` means no limit (always quality 80).
     pub max_bytes: Option<u64>,
+    /// Replace a file that is already there. Off by default: a run counts up
+    /// to `name-2.webp` instead of eating what someone else put there.
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,6 +91,41 @@ pub struct BatchResult {
     pub images: Vec<ImageResult>,
 }
 
+/// The images behind what was handed in: files as they are, and for a folder
+/// the supported images directly inside it.
+///
+/// One level deep on purpose — a dropped folder should give what is visible
+/// in it, not everything an archive underneath happens to hold. Sorted, so a
+/// run is reproducible; folders inside folders and everything unsupported
+/// are passed over in silence. A folder that yields nothing is kept as
+/// itself, so it can be reported instead of vanishing without a word.
+pub fn expand_inputs(inputs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for input in inputs {
+        if input.is_dir() {
+            let mut found: Vec<PathBuf> = fs::read_dir(input)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| {
+                            let path = e.ok()?.path();
+                            (path.is_file() && is_supported(&path)).then_some(path)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            found.sort();
+            if found.is_empty() {
+                out.push(input.clone());
+            } else {
+                out.append(&mut found);
+            }
+        } else {
+            out.push(input.clone());
+        }
+    }
+    out
+}
+
 pub fn is_supported(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -113,8 +153,20 @@ pub fn resolve_output_dir(
 }
 
 /// File names the batch would get right now (for the live preview).
-pub fn plan_file_names(slug: &str, count: usize, output_dir: &Path) -> Vec<String> {
-    let existing = existing_file_names(output_dir);
+///
+/// `avoid_existing` is off when the run is allowed to replace: then the names
+/// are the plain ones, and the preview says what will really be written.
+pub fn plan_file_names(
+    slug: &str,
+    count: usize,
+    output_dir: &Path,
+    avoid_existing: bool,
+) -> Vec<String> {
+    let existing = if avoid_existing {
+        existing_file_names(output_dir)
+    } else {
+        Vec::new()
+    };
     plan_base_names(&slugify(slug), count, existing.iter().map(String::as_str))
         .into_iter()
         .map(|stem| format!("{stem}.webp"))
@@ -135,9 +187,10 @@ pub fn convert(
     settings: &Settings,
     on_progress: impl Fn(usize, usize) + Sync,
 ) -> Result<BatchResult, String> {
+    let images = expand_inputs(images);
     let first = images.first().ok_or("Keine Bilder ausgewählt")?;
     let output_dir = resolve_output_dir(first, custom_output_dir, slug, images.len());
-    process_batch(images, slug, &output_dir, settings, on_progress)
+    process_batch(&images, slug, &output_dir, settings, on_progress)
 }
 
 pub fn process_batch(
@@ -150,10 +203,13 @@ pub fn process_batch(
     if images.is_empty() {
         return Err("Keine Bilder ausgewählt".to_string());
     }
-    fs::create_dir_all(output_dir)
-        .map_err(|e| format!("Zielordner konnte nicht angelegt werden: {e}"))?;
+    fs::create_dir_all(output_dir).map_err(|e| format!("Zielordner nicht anlegbar: {e}"))?;
+    // Once, before anything is encoded. A folder that cannot be written to is
+    // not a per-image problem, and finding it out eight times in a row helps
+    // nobody.
+    ensure_writable(output_dir)?;
 
-    let file_names = plan_file_names(slug, images.len(), output_dir);
+    let file_names = plan_file_names(slug, images.len(), output_dir, !settings.overwrite);
     let total = images.len();
     let done = AtomicUsize::new(0);
 
@@ -187,9 +243,15 @@ pub fn process_batch(
     })
 }
 
+/// Fehlertexte sind kurz gehalten: sie stehen im Panel hinter dem Dateinamen
+/// in einer Zeile von rund 42 Zeichen. Kurz und ganz zu lesen schlägt
+/// vollständig und abgeschnitten.
 fn process_image(source: &Path, path: &Path, settings: &Settings) -> Result<OutputFile, String> {
+    if source.is_dir() {
+        return Err("Ordner ohne Bilder".to_string());
+    }
     if !is_supported(source) {
-        return Err("Dateiformat wird nicht unterstützt".to_string());
+        return Err("Format nicht unterstützt".to_string());
     }
     let original = imageio::decode(source)?;
     let (mut width, mut height) = output_size(original.width, original.height, settings.limits);
@@ -221,13 +283,14 @@ fn process_image(source: &Path, path: &Path, settings: &Settings) -> Result<Outp
         (width, height) = output_size(width, height, Limits::long_edge_only(shorter));
     };
 
-    let bytes = write_new_file(path, &encoded.data)?;
+    // Where it really landed — the planned name may have been taken.
+    let (path, bytes) = write_file(path, &encoded.data, settings.overwrite)?;
     Ok(OutputFile {
-        path: path.to_string_lossy().into_owned(),
         file_name: path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
         width,
         height,
         bytes,
@@ -353,22 +416,91 @@ fn prepare_for_webp(mut pixels: Vec<u8>, has_alpha: bool) -> Vec<u8> {
     }
 }
 
-/// Writes a file that must not exist yet — never overwrites anything.
-fn write_new_file(path: &Path, bytes: &[u8]) -> Result<u64, String> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => "Datei existiert bereits".to_string(),
-            _ => e.to_string(),
-        })?;
-    if let Err(e) = file.write_all(bytes).and_then(|_| file.sync_all()) {
-        drop(file);
-        let _ = fs::remove_file(path);
-        return Err(e.to_string());
+/// Writes the file and says where it actually landed.
+///
+/// Unless `overwrite` is set, nothing that is already there is touched:
+/// `create_new` either wins the name or reports it taken, and then
+/// `name-2.webp`, `name-3.webp` … is tried. Asking whether a file exists and
+/// writing afterwards would be a race — three images of a batch are encoded
+/// at the same time, and two of them can plan the same name.
+fn write_file(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(PathBuf, u64), String> {
+    let written = |path: &Path, mut file: std::fs::File| -> Result<(PathBuf, u64), String> {
+        if let Err(e) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+            drop(file);
+            let _ = fs::remove_file(path);
+            return Err(e.to_string());
+        }
+        Ok((path.to_path_buf(), bytes.len() as u64))
+    };
+
+    if overwrite {
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        return written(path, file);
     }
-    Ok(bytes.len() as u64)
+
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let extension = path.extension().unwrap_or_default().to_string_lossy();
+    for attempt in 1..=MAX_NAME_ATTEMPTS {
+        let candidate = if attempt == 1 {
+            path.to_path_buf()
+        } else {
+            dir.join(format!("{}.{extension}", next_stem(&stem)))
+        };
+        stem = next_stem(&stem).into();
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return written(&candidate, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(format!(
+        "Kein freier Dateiname nach {MAX_NAME_ATTEMPTS} Versuchen"
+    ))
+}
+
+/// The next name after `stem`, in the shape the batch numbering already uses:
+/// `bild` → `bild-02`, `bild-02` → `bild-03`. One counter for both, so a
+/// folder does not end up with `bild-02.webp` next to `bild-2.webp`.
+fn next_stem(stem: &str) -> String {
+    if let Some((head, tail)) = stem.rsplit_once('-') {
+        if !head.is_empty() && tail.len() >= 2 {
+            if let Ok(number) = tail.parse::<u32>() {
+                return format!("{head}-{:02}", number + 1);
+            }
+        }
+    }
+    format!("{stem}-02")
+}
+
+/// Proves the folder takes a file, instead of trusting a permission bit that
+/// says little about folders owned by someone else.
+fn ensure_writable(dir: &Path) -> Result<(), String> {
+    let probe = dir.join(format!(
+        ".preen-schreibprobe-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    match OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(file) => {
+            drop(file);
+            let _ = fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(e) => Err(format!("Zielordner nicht beschreibbar: {e}")),
+    }
 }
 
 fn existing_file_names(dir: &Path) -> Vec<String> {

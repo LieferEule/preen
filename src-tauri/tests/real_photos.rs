@@ -31,6 +31,7 @@ fn real_photos() {
         },
         min_long_edge: std::env::var("PREEN_MIN").map_or(0, |v| v.parse().unwrap()),
         max_bytes: max_kb.map(|kb| kb * 1000),
+        overwrite: false,
     };
     println!("max. {long_edge} px lange Kante, {max_mp} MP, {max_kb:?} KB");
 

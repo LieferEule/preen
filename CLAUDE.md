@@ -25,8 +25,17 @@ verkleinert.
 ## Panelgeometrie
 Feste Höhe je Zustand, an einer Stelle definiert. Keine dynamische
 Höhenmessung, kein ResizeObserver.
-Ruhe 184, ein Bild 381, mehrere Bilder 403, fertig 258.
+Ruhe 184, ein Bild 381, mehrere Bilder 403, fertig 258, fertig mit
+zwei oder mehr Fehlschlägen 274. Neben das 60 px hohe Vorschaubild
+passen drei Textzeilen ohne Wachstum, die vierte kostet 16. Die Zahl
+kommt aus der Zusicherung im Debug-Build, nicht aus dem Stylesheet
+nachgerechnet — 2 px danebengelegen.
 Der Drop-Zustand ändert die Höhe nicht, er liegt als Overlay darüber.
+Abgelehnte Dateien brauchen auch keine: im Ladezustand ersetzen sie die
+Einstellungszeile, in der Ruhe die Zeile "Bild hierher ziehen".
+Fehlertexte kurz halten, sie stehen im Panel hinter dem Dateinamen in
+rund 42 Zeichen; kurz und ganz zu lesen schlägt vollständig und
+abgeschnitten.
 overflow: hidden auf html, body und #root; dazu preventScroll beim
 Fokus. Beides muss bleiben, sonst scrollt der Webview die Kopfzeile raus.
 Für Geometrie offsetHeight benutzen, nie getBoundingClientRect, das
@@ -37,6 +46,9 @@ Streifen.
 Im Debug-Build prüft eine Zusicherung die natürliche Inhaltshöhe gegen
 den Sollwert. Nach jeder Layoutänderung einmal im Debug-Build durch
 alle Zustände schalten, F8 schaltet den Drop-Zustand um.
+Die Zusicherung misst verzögert und schweigt, wenn der Zustand
+inzwischen ein anderer ist — sonst meldet sie bei schnellen Läufen
+Unsinn und man liest sie weg.
 
 ## macOS und Tauri, bekannte Fallen
 AppKit nur im Hauptthread. Shortcut, Tray und Zweitstart müssen

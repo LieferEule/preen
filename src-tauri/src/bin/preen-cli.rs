@@ -21,6 +21,8 @@ preen-cli — Bilder web-fertig als WebP, ohne GUI
                     hero (2400, 3,5 MP, 500 KB). Vorgabe: inhaltsbild
   --name <text>     Zielname; wird zum Slug für Dateinamen und Unterordner
   --out <ordner>    Zielordner. Vorgabe: der Ordner des ersten Bildes
+  --replace         bestehende Zieldateien ersetzen. Ohne das zählt ein
+                    Lauf weiter: name-2.webp, name-3.webp
   --json            Ergebnis als JSON auf stdout, sonst nichts
   -h, --help        diese Hilfe
 
@@ -32,6 +34,7 @@ struct Args {
     name: String,
     out: Option<PathBuf>,
     json: bool,
+    overwrite: bool,
     images: Vec<PathBuf>,
 }
 
@@ -49,7 +52,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let settings = args.preset.settings();
+    let settings = args.preset.settings(args.overwrite);
     match pipeline::convert(
         &args.images,
         &args.name,
@@ -90,6 +93,7 @@ fn parse(argv: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     let mut name = String::new();
     let mut out = None;
     let mut json = false;
+    let mut overwrite = false;
     let mut images = Vec::new();
 
     let mut argv = argv.peekable();
@@ -110,6 +114,7 @@ fn parse(argv: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
         match flag.as_str() {
             "-h" | "--help" => return Ok(None),
             "--json" => json = true,
+            "--replace" => overwrite = true,
             "--preset" => {
                 let v = value("--preset")?;
                 preset = preset::by_name(&v).ok_or_else(|| {
@@ -143,6 +148,7 @@ fn parse(argv: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
         name,
         out,
         json,
+        overwrite,
         images,
     }))
 }
@@ -179,6 +185,7 @@ fn print_json(args: &Args, result: &BatchResult, failed: usize) {
         "maxMegapixels": args.preset.max_megapixels,
         "maxKb": args.preset.max_kb,
         "minLongEdge": args.preset.min_long_edge,
+        "overwrite": args.overwrite,
         "name": args.name,
         "outputDir": result.output_dir,
         "failed": failed,

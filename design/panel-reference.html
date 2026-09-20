@@ -139,6 +139,14 @@
   </div>
 </section>
 
+<!--
+  RUHE, ABGELEHNT: wenn ein Ablegen nichts Brauchbares enthielt, tritt an
+  die Stelle von "Bild hierher ziehen" dieselbe Zeile in #8c2f26, mittig,
+  mehrzeilig erlaubt — die Ruhe-Ansicht hat vertikal Luft, die Höhe 184
+  bleibt. Eine Datei nennt ihren Grund, mehrere nennen ihre Namen. Steht,
+  bis der Nutzer etwas tut; kein Timer, den man verpassen kann.
+-->
+
 <!-- ============ 2 · GELADEN ============ -->
 <section>
   <div class="caption">2 · Bild drin</div>
@@ -162,7 +170,10 @@
         <button type="button" style="position: relative; z-index: 1; flex-grow: 1; flex-basis: 0; height: 36px; border: 0; border-radius: 12px; background: transparent; font-family: inherit; font-size: 13px; font-weight: 700; color: #0f2c2b; cursor: pointer; transition: color 380ms cubic-bezier(0.33, 0, 0.2, 1);">Inhaltsbild</button>
         <button type="button" style="position: relative; z-index: 1; flex-grow: 1; flex-basis: 0; height: 36px; border: 0; border-radius: 12px; background: transparent; font-family: inherit; font-size: 13px; font-weight: 500; color: #4a6b69; cursor: pointer; transition: color 380ms cubic-bezier(0.33, 0, 0.2, 1);">Hero</button>
       </div>
-      <div style="font-size: 11px; font-weight: 400; color: #4a6b69; padding-left: 4px;">1600 px breit · höchstens 260 KB</div>
+      <!-- Diese Zeile trägt drei Dinge, in dieser Reihenfolge: eine
+           Fehlermeldung des Laufs, sonst abgelehnte Dateien in #8c2f26,
+           sonst die Einstellungen. Immer eine Zeile, immer dieselbe Höhe. -->
+      <div style="font-size: 11px; font-weight: 400; color: #4a6b69; padding-left: 4px;">lange Kante 1600 px · 1,8 MP · höchstens 260 KB</div>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 7px;">
@@ -284,6 +295,63 @@
       <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: #8c2f26;">
         <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Über 260 KB · verkleinert auf 1130 px</span>
         <span style="flex-shrink: 0; font-variant-numeric: tabular-nums;">373 KB · Q60</span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: rgba(255,255,255,0.8); color: #0f2c2b; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(15,44,43,0.12);">Im Finder zeigen</button>
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: #2e6d63; color: #ffffff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(6,22,26,0.22);">Noch eins</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 3c · FERTIG MIT FEHLSCHLÄGEN ============ -->
+<!--
+  Einzige Abweichung von der Höhe 258: hier sind es 274. Neben das 60 px
+  hohe Vorschaubild passen drei Textzeilen ohne Wachstum, die vierte kostet
+  16 px — und die vierte ist der zweite Fehlschlag mit Namen und Grund.
+  Bis zwei Fehlschläge stehen einzeln da. Ab drei führen Anzahl und Grund,
+  die Namen stehen trotzdem auf der zweiten Zeile: eine Sammelzeile, deren
+  Inhalt nur im Tooltip steht, ist ein Versteck.
+  Ein einzelner Fehlschlag braucht nur drei Zeilen und bleibt bei 258.
+  Das Abzeichen trägt auch hier das Ausrufezeichen: wer vier Dateien
+  hineinzieht, will vier Dateien, und ein grünes Häkchen über roten Zeilen
+  wird nach zwei Wochen nur noch als Häkchen gelesen.
+-->
+<section>
+  <div class="caption">3c · Fertig mit Fehlschlägen (274)</div>
+  <div class="glass" style="width: 340px; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-radius: 34px;">
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="position: relative; width: 60px; height: 60px; flex-shrink: 0;">
+        <div style="width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(145deg, #c9a882 0%, #8f7a63 40%, #4e5b52 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);"></div>
+        <div style="position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 9999px; background: #8c2f26; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgba(255,255,255,0.85);">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3.4 L8 9.2"></path>
+            <path d="M8 12.6 L8 12.6"></path>
+          </svg>
+        </div>
+      </div>
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+        <div style="font-size: 13px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">2 von 4 fertig</div>
+        <div style="font-size: 11px; font-weight: 400; color: #4a6b69;">1600 × 900 px · Qualität 80</div>
+        <div style="font-size: 11px; font-weight: 400; color: #8c2f26; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">kaputt.jpg — kein lesbares Bild</div>
+        <div style="font-size: 11px; font-weight: 400; color: #8c2f26; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">fehlt.png — nicht lesbar</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px 14px; border-radius: 20px; background: rgba(255,255,255,0.62); box-shadow: inset 0 0 0 1px rgba(15,44,43,0.1);">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <div style="font-size: 27px; font-weight: 600; letter-spacing: -0.02em; color: #0f2c2b; font-variant-numeric: tabular-nums;">216 KB</div>
+        <div style="font-size: 12px; font-weight: 400; color: #4a6b69;">aus 9,4 MB</div>
+      </div>
+      <div style="position: relative; height: 7px; border-radius: 9999px; background: rgba(15,44,43,0.12); overflow: hidden;">
+        <div style="position: absolute; top: 0; bottom: 0; left: 0; width: 41.5%; border-radius: 9999px; background: #2e6d63;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 500; letter-spacing: 0.02em; color: #4a6b69;">
+        <span style="font-variant-numeric: tabular-nums;">42 % der Obergrenze</span>
+        <span>Grenze 260 KB</span>
       </div>
     </div>
 

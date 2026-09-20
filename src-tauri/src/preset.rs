@@ -48,11 +48,12 @@ impl Preset {
         }
     }
 
-    pub fn settings(&self) -> Settings {
+    pub fn settings(&self, overwrite: bool) -> Settings {
         Settings {
             limits: self.limits(),
             min_long_edge: self.min_long_edge,
             max_bytes: Some(self.max_kb * 1000),
+            overwrite,
         }
     }
 }
@@ -80,11 +81,13 @@ mod tests {
 
     #[test]
     fn settings_use_kb_of_1000_bytes_and_whole_pixels() {
-        assert_eq!(HERO.settings().max_bytes, Some(500_000));
+        assert_eq!(HERO.settings(false).max_bytes, Some(500_000));
         assert_eq!(HERO.limits().long_edge, 2400);
         assert_eq!(HERO.limits().max_pixels, 3_500_000);
         assert_eq!(INHALTSBILD.limits().max_pixels, 1_800_000);
-        assert_eq!(HERO.settings().min_long_edge, 1600);
-        assert_eq!(INHALTSBILD.settings().min_long_edge, 1000);
+        assert_eq!(HERO.settings(false).min_long_edge, 1600);
+        assert_eq!(INHALTSBILD.settings(false).min_long_edge, 1000);
+        assert!(!HERO.settings(false).overwrite);
+        assert!(HERO.settings(true).overwrite);
     }
 }

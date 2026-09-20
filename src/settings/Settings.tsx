@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Switch } from "../components/Switch";
 import { getVersion } from "@tauri-apps/api/app";
 import { desktopDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -418,26 +419,6 @@ function Row(props: {
   );
 }
 
-function Switch(props: { checked: boolean; label: string; onChange: (value: boolean) => void }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={props.checked}
-      aria-label={props.label}
-      onClick={() => props.onChange(!props.checked)}
-      className={`relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-[240ms] ${
-        props.checked ? "bg-[var(--color-accent)]" : "bg-[rgba(15,44,43,0.18)]"
-      }`}
-    >
-      <span
-        className={`absolute top-[3px] size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(6,22,26,0.3)] transition-[left] duration-[240ms] ${
-          props.checked ? "left-[21px]" : "left-[3px]"
-        }`}
-        style={{ transitionTimingFunction: "var(--ease-ui)" }}
-      />
-    </button>
-  );
-}
 
 /**
  * Tauri accelerator for a key event, or null when the combination is not

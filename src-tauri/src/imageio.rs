@@ -79,7 +79,7 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
     );
     let index = unsafe { source.primary_image_index() };
     let image = unsafe { source.thumbnail_at_index(index, Some(options.as_opaque())) }
-        .ok_or_else(|| "Bild konnte nicht dekodiert werden".to_string())?;
+        .ok_or_else(|| "nicht dekodierbar".to_string())?;
 
     let width = CGImage::width(Some(&image));
     let height = CGImage::height(Some(&image));
@@ -127,10 +127,10 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
 
 fn open(path: &Path) -> Result<CFRetained<CGImageSource>, String> {
     let url = CFURL::from_file_path(path).ok_or_else(|| "Ungültiger Dateipfad".to_string())?;
-    let source = unsafe { CGImageSource::with_url(&url, None) }
-        .ok_or_else(|| "Datei konnte nicht gelesen werden".to_string())?;
+    let source =
+        unsafe { CGImageSource::with_url(&url, None) }.ok_or_else(|| "nicht lesbar".to_string())?;
     if unsafe { source.count() } == 0 {
-        return Err("Kein lesbares Bild in der Datei".to_string());
+        return Err("kein lesbares Bild".to_string());
     }
     Ok(source)
 }
@@ -139,7 +139,7 @@ fn open(path: &Path) -> Result<CFRetained<CGImageSource>, String> {
 fn raw_properties(source: &CGImageSource) -> Result<(u32, u32, i64), String> {
     let index = unsafe { source.primary_image_index() };
     let properties = unsafe { source.properties_at_index(index, None) }
-        .ok_or_else(|| "Bildeigenschaften nicht lesbar".to_string())?;
+        .ok_or_else(|| "Eigenschaften nicht lesbar".to_string())?;
     let properties: &CFDictionary<CFString, CFType> = unsafe { properties.cast_unchecked() };
     let number = |key: &CFString| -> Option<i64> {
         properties.get(key)?.downcast::<CFNumber>().ok()?.as_i64()

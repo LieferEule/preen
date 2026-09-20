@@ -27,6 +27,7 @@ const CONTENT: Settings = Settings {
     },
     min_long_edge: 1000,
     max_bytes: Some(260_000),
+    overwrite: false,
 };
 
 /// Copies the fixtures into a fresh temp folder (so the default output
@@ -192,6 +193,7 @@ fn max_width_is_respected_and_never_upscales() {
         limits: Limits::long_edge_only(3200),
         min_long_edge: 0,
         max_bytes: Some(500_000),
+        overwrite: false,
     };
     let dims: Vec<(u32, u32)> = outputs(&run(&paths, "hero", &hero))
         .iter()
@@ -203,6 +205,7 @@ fn max_width_is_respected_and_never_upscales() {
         limits: Limits::long_edge_only(800),
         min_long_edge: 0,
         max_bytes: Some(100_000),
+        overwrite: false,
     };
     let dims: Vec<(u32, u32)> = outputs(&run(&paths, "thumb", &thumb))
         .iter()
@@ -418,6 +421,7 @@ fn webp_is_accepted_as_a_source() {
         limits: Limits::long_edge_only(800),
         min_long_edge: 0,
         max_bytes: None,
+        overwrite: false,
     };
     let result = run(&[source], "aus-webp", &settings);
     let files = outputs(&result);
@@ -436,6 +440,7 @@ fn emergency_scaling_shrinks_when_the_quality_floor_is_not_enough() {
             limits: Limits::long_edge_only(1200),
             min_long_edge: 0,
             max_bytes: limit,
+            overwrite: false,
         };
         let result = run(std::slice::from_ref(&source), slug, &settings);
         outputs(&result)[0].clone()
@@ -476,6 +481,7 @@ fn emergency_scaling_stops_at_the_next_preset_down() {
         // Wie hero: nie unter die lange Kante des Inhaltsbildes.
         min_long_edge: 1000,
         max_bytes: Some(1),
+        overwrite: false,
     };
     let out = outputs(&run(std::slice::from_ref(&source), "boden", &settings))[0].clone();
 
@@ -496,6 +502,7 @@ fn a_source_already_below_the_floor_is_not_shrunk_further() {
         limits: Limits::long_edge_only(1200),
         min_long_edge: 1000,
         max_bytes: Some(1),
+        overwrite: false,
     };
     let out = outputs(&run(std::slice::from_ref(&source), "klein", &settings))[0].clone();
     assert_eq!((out.width, out.height), (900, 600), "{out:?}");
@@ -504,4 +511,225 @@ fn a_source_already_below_the_floor_is_not_shrunk_further() {
         !out.emergency_scaled,
         "unter der Untergrenze wird nicht skaliert"
     );
+}
+
+#[test]
+fn an_occupied_name_counts_up_instead_of_overwriting() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "quelle.webp", 400, 300);
+    let out = tmp.path().join("ziel");
+    fs::create_dir(&out).unwrap();
+    // Von Hand belegt, mit Inhalt, der nicht verloren gehen darf.
+    fs::write(out.join("bild.webp"), b"fremd").unwrap();
+    let settings = Settings {
+        limits: Limits::long_edge_only(400),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: false,
+    };
+
+    let first = pipeline::convert(
+        std::slice::from_ref(&source),
+        "bild",
+        Some(&out),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap();
+    let written = first.images[0].output.as_ref().unwrap();
+    assert_eq!(written.file_name, "bild-02.webp");
+    // Der Name in der Ergebniszeile ist der, der wirklich auf der Platte steht.
+    assert!(Path::new(&written.path).is_file());
+    assert_eq!(fs::read(out.join("bild.webp")).unwrap(), b"fremd");
+
+    // Noch einmal: zählt weiter, statt den eigenen Lauf zu fressen.
+    let second = pipeline::convert(
+        std::slice::from_ref(&source),
+        "bild",
+        Some(&out),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(
+        second.images[0].output.as_ref().unwrap().file_name,
+        "bild-03.webp"
+    );
+}
+
+#[test]
+fn replacing_is_only_done_when_it_is_asked_for() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "quelle.webp", 400, 300);
+    let out = tmp.path().join("ziel");
+    fs::create_dir(&out).unwrap();
+    fs::write(out.join("bild.webp"), b"fremd").unwrap();
+    let settings = Settings {
+        limits: Limits::long_edge_only(400),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: true,
+    };
+
+    let result = pipeline::convert(
+        std::slice::from_ref(&source),
+        "bild",
+        Some(&out),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap();
+    let written = result.images[0].output.as_ref().unwrap();
+    assert_eq!(written.file_name, "bild.webp");
+    assert!(fs::read(out.join("bild.webp")).unwrap().len() > 5);
+    assert_eq!(fs::read_dir(&out).unwrap().count(), 1, "kein zweiter Name");
+}
+
+#[test]
+fn a_folder_hands_over_the_images_one_level_down() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("urlaub");
+    let deeper = folder.join("rohdaten");
+    fs::create_dir_all(&deeper).unwrap();
+    detailed_webp(&folder, "a.webp", 40, 30);
+    detailed_webp(&folder, "b.webp", 40, 30);
+    detailed_webp(&deeper, "zu-tief.webp", 40, 30);
+    fs::write(folder.join("notizen.txt"), b"kein Bild").unwrap();
+
+    let found = pipeline::expand_inputs(std::slice::from_ref(&folder));
+    let names: Vec<String> = found
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["a.webp", "b.webp"], "eine Ebene, sortiert");
+
+    // Datei und Ordner gemischt, und die Datei bleibt, wo sie war.
+    let single = folder.join("a.webp");
+    let mixed = pipeline::expand_inputs(&[single.clone(), deeper.clone()]);
+    assert_eq!(mixed, [single, deeper.join("zu-tief.webp")]);
+
+    // Ein Ordner ohne Bilder verschwindet nicht stillschweigend, sondern
+    // bleibt stehen und wird später als Fehlschlag gemeldet.
+    let empty = tmp.path().join("leer");
+    fs::create_dir(&empty).unwrap();
+    assert_eq!(
+        pipeline::expand_inputs(std::slice::from_ref(&empty)),
+        vec![empty.clone()]
+    );
+
+    let settings = Settings {
+        limits: Limits::long_edge_only(120),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: false,
+    };
+    let result = pipeline::convert(
+        std::slice::from_ref(&empty),
+        "leer",
+        Some(&tmp.path().join("ziel")),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(
+        result.images[0].error.as_deref(),
+        Some("Ordner ohne Bilder")
+    );
+}
+
+#[test]
+fn a_broken_file_fails_alone_and_the_batch_finishes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let good = detailed_webp(tmp.path(), "gut.webp", 200, 150);
+    let broken = tmp.path().join("kaputt.jpg");
+    fs::write(&broken, b"das ist kein JPEG").unwrap();
+    let wrong_format = tmp.path().join("notizen.txt");
+    fs::write(&wrong_format, b"Text").unwrap();
+    let missing = tmp.path().join("weg.png");
+    let settings = Settings {
+        limits: Limits::long_edge_only(200),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: false,
+    };
+
+    let result = pipeline::convert(
+        &[good, broken, wrong_format, missing],
+        "teilerfolg",
+        Some(&tmp.path().join("ziel")),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap();
+
+    assert_eq!(result.images.len(), 4);
+    assert!(result.images[0].output.is_some(), "{:?}", result.images[0]);
+    for failed in &result.images[1..] {
+        assert!(failed.output.is_none());
+        assert!(failed.error.is_some(), "{failed:?}");
+    }
+    // Was fertig ist, bleibt liegen.
+    assert!(Path::new(&result.images[0].output.as_ref().unwrap().path).is_file());
+}
+
+#[test]
+fn an_unwritable_target_stops_the_run_once_and_not_per_image() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "quelle.webp", 200, 150);
+    let locked = tmp.path().join("gesperrt");
+    fs::create_dir(&locked).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let settings = Settings {
+        limits: Limits::long_edge_only(200),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: false,
+    };
+    let error = pipeline::convert(
+        std::slice::from_ref(&source),
+        "geht-nicht",
+        Some(&locked),
+        &settings,
+        |_, _| {},
+    )
+    .unwrap_err();
+    assert!(error.contains("nicht beschreibbar"), "{error}");
+
+    // Wieder freigeben, damit das temporäre Verzeichnis aufräumen kann.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn the_counter_has_one_shape_for_batches_and_for_collisions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("ziel");
+    fs::create_dir(&out).unwrap();
+    let sources: Vec<PathBuf> = (1..=3)
+        .map(|n| detailed_webp(tmp.path(), &format!("q{n}.webp"), 120, 90))
+        .collect();
+    let settings = Settings {
+        limits: Limits::long_edge_only(120),
+        min_long_edge: 0,
+        max_bytes: None,
+        overwrite: false,
+    };
+    let run_here = |paths: &[PathBuf]| {
+        let result = pipeline::convert(paths, "reihe", Some(&out), &settings, |_, _| {}).unwrap();
+        outputs(&result)
+            .iter()
+            .map(|o| o.file_name.clone())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        run_here(&sources),
+        ["reihe-01.webp", "reihe-02.webp", "reihe-03.webp"]
+    );
+    // Der zweite Lauf zählt in derselben Form weiter, nicht in einer zweiten.
+    assert_eq!(run_here(&sources[..2]), ["reihe-04.webp", "reihe-05.webp"]);
+    // Mehrere Bilder bekommen den Unterordner; dort liegen jetzt fünf Dateien
+    // und keine ist überschrieben worden.
+    assert_eq!(fs::read_dir(out.join("reihe")).unwrap().count(), 5);
 }

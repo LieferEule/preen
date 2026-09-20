@@ -56,6 +56,8 @@ export interface Limits {
   maxMegapixels: number;
   minLongEdge: number;
   maxKb: number | null;
+  /** Replace files that are already there instead of counting up. */
+  overwrite: boolean;
 }
 
 export const inspectImages = (paths: string[]) =>
@@ -71,6 +73,7 @@ export const previewOutput = (args: {
   sizes: [number, number][];
   longEdge: number;
   maxMegapixels: number;
+  overwrite: boolean;
   customOutputDir: string | null;
 }) => invoke<OutputPreview>("preview_output", args);
 

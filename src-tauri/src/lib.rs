@@ -71,6 +71,9 @@ struct Progress {
 }
 
 /// Checks dropped paths: supported format and readable dimensions.
+///
+/// A dropped folder stands for the images directly inside it — the same
+/// expansion a run does, so what the panel lists is what gets processed.
 #[tauri::command]
 async fn inspect_images(paths: Vec<String>) -> InspectResult {
     tauri::async_runtime::spawn_blocking(move || {
@@ -78,16 +81,23 @@ async fn inspect_images(paths: Vec<String>) -> InspectResult {
             images: vec![],
             rejected: vec![],
         };
-        for path in paths {
+        let expanded =
+            pipeline::expand_inputs(&paths.iter().map(PathBuf::from).collect::<Vec<_>>());
+        for path in expanded
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+        {
             let p = Path::new(&path);
             let name = p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.clone());
-            let checked = if !p.is_file() {
-                Err("Keine Datei".to_string())
+            let checked = if p.is_dir() {
+                Err("Ordner ohne Bilder".to_string())
+            } else if !p.is_file() {
+                Err("keine Datei".to_string())
             } else if !pipeline::is_supported(p) {
-                Err("Format nicht unterstützt (nur JPG, PNG, WebP, HEIC, TIFF)".to_string())
+                Err("Format nicht unterstützt".to_string())
             } else {
                 imageio::dimensions(p)
             };
@@ -135,6 +145,7 @@ fn preview_output(
     sizes: Vec<(u32, u32)>,
     long_edge: u32,
     max_megapixels: f64,
+    overwrite: bool,
     custom_output_dir: Option<String>,
 ) -> NamePreview {
     let limits = output_limits(long_edge, max_megapixels);
@@ -144,7 +155,7 @@ fn preview_output(
         &slug,
         sizes.len(),
     );
-    let file_names = pipeline::plan_file_names(&slug, sizes.len().max(1), &output_dir);
+    let file_names = pipeline::plan_file_names(&slug, sizes.len().max(1), &output_dir, !overwrite);
     NamePreview {
         items: file_names
             .into_iter()
@@ -171,6 +182,9 @@ struct RunLimits {
     min_long_edge: u32,
     /// 1 KB = 1000 bytes, like Finder; `None` means no limit.
     max_kb: Option<u64>,
+    /// Replace files that are already there instead of counting up.
+    #[serde(default)]
+    overwrite: bool,
 }
 
 impl From<RunLimits> for pipeline::Settings {
@@ -179,6 +193,7 @@ impl From<RunLimits> for pipeline::Settings {
             limits: output_limits(l.long_edge, l.max_megapixels),
             min_long_edge: l.min_long_edge,
             max_bytes: l.max_kb.map(|kb| kb * 1000),
+            overwrite: l.overwrite,
         }
     }
 }
