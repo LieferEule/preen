@@ -22,6 +22,7 @@ import {
   onForgetImages,
   onOpenFiles,
   onPanelShown,
+  onDebugRun,
   onProgress,
   onSettingsChanged,
   previewOutput,
@@ -135,6 +136,8 @@ export default function Panel() {
   const [activity, setActivity] = useState(0);
 
   const slugInput = useRef<HTMLInputElement>(null);
+  /** Lets the debug shortcut reach the current `run` without re-binding. */
+  const runRef = useRef<() => void>(() => {});
   const grewOnce = useRef(false);
   /** For the handler that runs when the panel is summoned again. */
   const heightRef = useRef(HEIGHTS.idle);
@@ -391,6 +394,8 @@ export default function Panel() {
     }
   };
 
+  runRef.current = run;
+
   const startOver = () => {
     setRejected([]);
     setImages([]);
@@ -447,12 +452,24 @@ export default function Panel() {
     }
   }, [panelHeight, phase.kind, images.length]);
 
-  // Debug builds only: F8 stands in for a file hovering over the panel, so the
-  // drop state can be looked at without dragging something from Finder.
+  // Debug builds only: the panel cannot be operated from a script — there is
+  // no drag from Finder, and Return only fires while the name field has DOM
+  // focus. F8 stands in for a file hovering over the panel, ⇧F8 for a press
+  // on "Verarbeiten"; without those two, every screenshot of the drop and
+  // finished states needs a human hand. Both sit on F8 because macOS keeps
+  // F9 to F12 for Mission Control and the media keys — they never arrive.
+  useEffect(() => {
+    if (!__PREEN_DEBUG__) return;
+    const unlisten = onDebugRun(() => runRef.current());
+    return () => void unlisten.then((f) => f());
+  }, []);
+
   useEffect(() => {
     if (!__PREEN_DEBUG__) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F8") setDragging((d) => !d);
+      if (e.key !== "F8") return;
+      if (e.shiftKey) runRef.current();
+      else setDragging((d) => !d);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

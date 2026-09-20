@@ -45,7 +45,9 @@ einem Thread; der Webview hinkt sonst nach und es entsteht ein grauer
 Streifen.
 Im Debug-Build prüft eine Zusicherung die natürliche Inhaltshöhe gegen
 den Sollwert. Nach jeder Layoutänderung einmal im Debug-Build durch
-alle Zustände schalten, F8 schaltet den Drop-Zustand um.
+alle Zustände schalten. F8 schaltet den Drop-Zustand um, Shift+F8
+drückt Verarbeiten — damit kommt man ohne fremde Hand in jeden
+Zustand. Nicht F9 bis F12 nehmen, die greift sich macOS.
 Die Zusicherung misst verzögert und schweigt, wenn der Zustand
 inzwischen ein anderer ist — sonst meldet sie bei schnellen Läufen
 Unsinn und man liest sie weg.

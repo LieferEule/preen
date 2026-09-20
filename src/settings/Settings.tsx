@@ -30,7 +30,9 @@ export default function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [target, setTarget] = useState<Target>(TARGET_SOURCE);
   const [dock, setDock] = useState(false);
-  const [autostart, setAutostart] = useState(true);
+  // Aus, bis die Abfrage etwas anderes sagt — die App trägt sich nicht
+  // mehr von selbst in den Systemstart ein, also ist Aus die Wahrheit.
+  const [autostart, setAutostart] = useState(false);
   const [autoHide, setAutoHide] = useState(20);
   const [targetMenu, setTargetMenu] = useState(false);
   const [version, setVersion] = useState("");

@@ -154,6 +154,10 @@ export const debugLog = (message: string) => invoke<void>("debug_log", { message
 export const onPanelShown = (cb: () => void): Promise<UnlistenFn> =>
   listen("preen://panel-shown", () => cb());
 
+/** Debug builds with PREEN_AUTORUN=1: press "Verarbeiten" without a hand. */
+export const onDebugRun = (cb: () => void): Promise<UnlistenFn> =>
+  listen("preen://debug-run", () => cb());
+
 /** Images handed to the app from outside: "Öffnen mit", or a path on the command line. */
 export const onOpenFiles = (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
   listen<string[]>("preen://open-files", (e) => cb(e.payload));

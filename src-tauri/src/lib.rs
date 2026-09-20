@@ -381,6 +381,16 @@ fn open_files(app: &AppHandle, paths: Vec<String>) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(900));
         let _ = app.emit("preen://open-files", paths);
+        // Debug-Builds mit PREEN_AUTORUN=1 drücken danach selbst auf
+        // Verarbeiten. Das Panel lässt sich von außen nicht bedienen — kein
+        // Finder-Drag, keine Klicks, und die freien Funktionstasten greift
+        // sich macOS —, ohne das bräuchte jeder Screenshot des
+        // Fertig-Zustands eine fremde Hand.
+        #[cfg(debug_assertions)]
+        if std::env::var("PREEN_AUTORUN").is_ok() {
+            std::thread::sleep(std::time::Duration::from_millis(2500));
+            let _ = app.emit("preen://debug-run", ());
+        }
     });
 }
 
@@ -463,9 +473,12 @@ pub fn run() {
                 open_files(&handle, arguments);
             }
 
+            // Beim ersten Start zeigt sich das Panel einmal, sonst sieht die
+            // App aus, als wäre sie nie gestartet. Den Autostart trägt sie
+            // dabei NICHT ein: sich ungefragt in den Systemstart zu setzen
+            // ist eine Überraschung, die niemand haben will. Wer ihn will,
+            // schaltet ihn in den Einstellungen ein.
             if settings::take_first_run(&handle) {
-                use tauri_plugin_autostart::ManagerExt;
-                let _ = handle.autolaunch().enable();
                 panel::show(&handle);
             }
             Ok(())

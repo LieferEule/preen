@@ -1,5 +1,11 @@
+# Abhängigkeiten
 node_modules
+
+# Gebautes
 dist
 src-tauri/target
 src-tauri/gen
+
+# Werkzeuge und Arbeitsstand
+.claude
 .DS_Store
