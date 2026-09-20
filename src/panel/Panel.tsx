@@ -4,15 +4,16 @@ import { desktopDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import PreenMark from "../components/icons/PreenMark";
-import { ChevronIcon, CheckIcon, CloseIcon, FolderIcon, SlidersIcon } from "../components/icons/Glyphs";
+import { ChevronIcon, CheckIcon, FolderIcon, SlidersIcon } from "../components/icons/Glyphs";
 import {
   TARGET_DESKTOP,
   TARGET_SOURCE,
   appSettings,
-  emphasizePanel,
   hidePanel,
   inspectImages,
   loadPreset,
+  onForgetImages,
+  onOpenFiles,
   onPanelShown,
   onProgress,
   onSettingsChanged,
@@ -20,7 +21,9 @@ import {
   processImages,
   rememberTarget,
   resizePanel,
+  debugLog,
   savePreset,
+  suggestName,
   suggestSlug,
   targetIsUsable,
   thumbnail,
@@ -29,32 +32,44 @@ import {
   type Target,
 } from "../lib/api";
 import { PRESETS, SIZE_RANGE, WIDTH_RANGE, kb, presetByName, type Preset } from "../lib/presets";
-import { Counting, Popover, useRamp } from "./widgets";
+import { Popover } from "../components/Popover";
+import { Counting, Swap, reducedMotion, useRamp } from "./widgets";
 
-const IDLE_HEIGHT = 184;
+/** Panel width once an image is loaded; matches LOADED_WIDTH in panel.rs. */
+const LOADED_WIDTH = 340;
+/**
+ * The panel's four heights, and the only place they are written down.
+ * Layout and spacing come from design/panel-reference.html; these numbers are
+ * what that layout measures in the app, with the system font.
+ *
+ * Measuring at runtime instead meant measuring mid-animation and mid-wrap, and
+ * the window ended up shorter than the card. Nothing else may change the
+ * height: a file hovering over the panel only lights a ring (see DROP_RING).
+ */
+const HEIGHTS = { idle: 184, one: 381, many: 403, done: 258 };
+/** How long the panel takes to open after a drop. */
+const GROW_MS = 480;
+/** ... and to fold back up. */
+const SHRINK_MS = 380;
 
-// The panel's three resting looks. These live here rather than in a utility
-// class because they are states of one element, and inline styles are the one
-// place where their order is not up to the CSS layer sorting.
-const QUIET_TILE = {
-  background: "linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,255,255,0.58))",
-  boxShadow:
-    "inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.4), 0 26px 60px rgba(6,22,26,0.42), 0 3px 10px rgba(6,22,26,0.2)",
-  transition: "background 160ms ease-out, box-shadow 160ms ease-out",
-};
-const HOVER_TILE = {
-  background: "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.66))",
-  boxShadow:
-    "inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.4), 0 32px 70px rgba(6,22,26,0.5), 0 4px 12px rgba(6,22,26,0.24)",
-  transition: "background 160ms ease-out, box-shadow 160ms ease-out",
-};
-const DROP_TILE = {
-  background: "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.66))",
-  boxShadow:
-    "inset 0 0 0 2px var(--color-accent), inset 0 1px 0 rgba(255,255,255,0.95), 0 32px 70px rgba(6,22,26,0.5), 0 4px 12px rgba(6,22,26,0.24)",
-  transition:
-    "background 180ms cubic-bezier(0.22,1,0.36,1), box-shadow 180ms cubic-bezier(0.22,1,0.36,1)",
-};
+// The panel's three resting looks, from design/panel-reference.html. Hovering
+// does not change the surface, it lights an inner ring — the zero-alpha ring
+// in the resting state is what the transition interpolates from.
+const TILE_SURFACE =
+  "linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(228,239,237,0.60) 100%)";
+const TILE_BASE =
+  "0 26px 60px rgba(6,22,26,0.42), 0 3px 10px rgba(6,22,26,0.2), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.4)";
+const tile = (ring: string, glow: string) => ({
+  background: TILE_SURFACE,
+  boxShadow: `${TILE_BASE}, inset 0 0 0 1.5px rgba(46,109,99,${ring}), inset 0 0 30px -6px rgba(46,109,99,${glow})`,
+  transition: "box-shadow 240ms var(--ease-ui)",
+});
+const QUIET_TILE = tile("0", "0");
+const HOVER_TILE = tile("0.45", "0.32");
+/** A file hovering over the panel lights this ring — an overlay, so no state
+ *  change can alter the layout height. */
+const DROP_RING =
+  "inset 0 0 0 1.5px rgba(46,109,99,0.9), inset 0 0 30px -6px rgba(46,109,99,0.5)";
 
 type Phase =
   | { kind: "idle" }
@@ -91,8 +106,10 @@ export default function Panel() {
   const [activity, setActivity] = useState(0);
 
   const slugInput = useRef<HTMLInputElement>(null);
-  const content = useRef<HTMLDivElement>(null);
   const grewOnce = useRef(false);
+  /** For the handler that runs when the panel is summoned again. */
+  const heightRef = useRef(HEIGHTS.idle);
+  const phaseRef = useRef("idle");
   const busy = phase.kind === "processing";
   const busyRef = useRef(false);
   busyRef.current = busy;
@@ -161,13 +178,29 @@ export default function Panel() {
   }, []);
 
   useEffect(() => {
+    const unlisten = onOpenFiles((paths) => addPaths(paths));
+    return () => void unlisten.then((f) => f());
+  }, [addPaths]);
+
+  useEffect(() => {
     const unlisten = onPanelShown(() => {
       setHovered(false);
       setActivity((n) => n + 1);
-      slugInput.current?.focus();
+      slugInput.current?.focus({ preventScroll: true });
+      // The window may have been left at a stale size; state it again.
+      resizePanel(heightRef.current, phaseRef.current !== "idle", 0);
     });
     return () => void unlisten.then((f) => f());
   }, []);
+
+  // Hidden for long enough: let go of the picture, so the next summon starts
+  // clean. Never while a run is going on.
+  useEffect(() => {
+    const unlisten = onForgetImages(() => {
+      if (phase.kind !== "processing") startOver();
+    });
+    return () => void unlisten.then((f) => f());
+  });
 
   useEffect(() => {
     const unlisten = onSettingsChanged(() =>
@@ -220,7 +253,7 @@ export default function Panel() {
       return;
     }
     let stale = false;
-    suggestSlug(suggestionSource).then((s) => !stale && setSlug(s));
+    suggestName(suggestionSource).then((s) => !stale && setSlug(s));
     return () => {
       stale = true;
     };
@@ -306,35 +339,53 @@ export default function Panel() {
     setPhase({ kind: "idle" });
   };
 
-  // Only a file hovering over the panel grows it. Plain mouse-over must not:
-  // a window that resizes mid-drag loses the grip point, and the panel then
-  // jumps away from the pointer.
-  useEffect(() => {
-    if (phase.kind !== "idle") return;
-    emphasizePanel(dragging ? 1.06 : 1);
-  }, [dragging, phase.kind]);
-
   // ---- window size -------------------------------------------------------
+  // One height per state. The window is told what it will be, instead of
+  // chasing a measurement that changes while the panel animates.
+  const panelHeight =
+    phase.kind === "idle"
+      ? HEIGHTS.idle
+      : phase.kind === "done"
+        ? HEIGHTS.done
+        : images.length > 1
+          ? HEIGHTS.many
+          : HEIGHTS.one;
+
   useLayoutEffect(() => {
-    if (phase.kind === "idle") {
-      grewOnce.current = false;
-      resizePanel(IDLE_HEIGHT, false, false);
-      return;
+    const isLoaded = phase.kind !== "idle";
+    const opening = isLoaded && !grewOnce.current && !reducedMotion();
+    const closing = !isLoaded && grewOnce.current && !reducedMotion();
+    grewOnce.current = isLoaded;
+    resizePanel(panelHeight, isLoaded, opening ? GROW_MS : closing ? SHRINK_MS : 0);
+
+    // Debug builds only: shout when the layout and the fixed height disagree.
+    if (__PREEN_DEBUG__) {
+      // The card is told its height, so comparing it with itself proves
+      // nothing: what matters is what the content inside actually needs.
+      setTimeout(() => {
+        const inner = document.getElementById("panel-content");
+        const actual = inner ? inner.offsetHeight : HEIGHTS.idle;
+        if (actual !== panelHeight) {
+          const message = `HÖHE STIMMT NICHT · Zustand "${phase.kind}"${
+            isLoaded ? ` (${images.length} Bild${images.length === 1 ? "" : "er"})` : ""
+          } · soll ${panelHeight} px · ist ${actual} px`;
+          console.error(`[preen] ${message}`);
+          debugLog(message);
+        }
+      }, 600);
     }
-    const element = content.current;
-    if (!element) return;
-    const report = () => {
-      const height = Math.ceil(element.getBoundingClientRect().height);
-      // Only the drop itself animates; later height changes snap.
-      const animate = !grewOnce.current;
-      grewOnce.current = true;
-      resizePanel(height, true, animate);
+  }, [panelHeight, phase.kind, images.length]);
+
+  // Debug builds only: F8 stands in for a file hovering over the panel, so the
+  // drop state can be looked at without dragging something from Finder.
+  useEffect(() => {
+    if (!__PREEN_DEBUG__) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F8") setDragging((d) => !d);
     };
-    report();
-    const observer = new ResizeObserver(report);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [phase.kind]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // ---- keyboard ----------------------------------------------------------
   useEffect(() => {
@@ -347,40 +398,76 @@ export default function Panel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [popover]);
 
-  const radius = loaded || phase.kind !== "idle" ? 34 : 42;
+  const targetOptions: { value: Target; label: string; hint?: string }[] = [
+    { value: TARGET_SOURCE, label: "Quellordner" },
+    { value: TARGET_DESKTOP, label: "Schreibtisch" },
+    ...recent.map((path) => ({
+      value: path,
+      label: path.split("/").pop() ?? path,
+      hint: "zuletzt",
+    })),
+  ];
+  const activeTargetIndex = targetOptions.findIndex((o) => o.value === target);
+  const loadedLayout = phase.kind !== "idle";
+  const radius = loadedLayout ? 34 : 42;
+  heightRef.current = panelHeight;
+  phaseRef.current = phase.kind;
 
   return (
     <div
       // "deep": the whole panel is a drag handle, except buttons and fields,
       // which Tauri excludes on its own.
+      id="panel-card"
       data-tauri-drag-region="deep"
-      className="group relative h-full"
+      // `fixed` pins the card to the viewport: focusing the name field made
+      // WebKit scroll the document, which pushed the header out of sight.
+      // Anchored at the bottom, so any surplus goes up into the invisible.
+      // The width is fixed while the window is still growing into it, or the
+      // text would re-wrap at every intermediate width.
+      className={`group fixed ${
+        loadedLayout ? "bottom-0 left-1/2 -translate-x-1/2" : "inset-0"
+      }`}
       style={{
+        // The resting tile fills whatever the window is, because the window
+        // itself grows a little when a file hovers over it.
+        width: loadedLayout ? LOADED_WIDTH : undefined,
+        height: loadedLayout ? panelHeight : undefined,
         borderRadius: radius,
-        ...(dragging ? DROP_TILE : hovered ? HOVER_TILE : QUIET_TILE),
+        ...(hovered || dragging ? HOVER_TILE : QUIET_TILE),
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onMouseDownCapture={() => popover && setPopover(null)}
     >
+      {/* Only opacity changes here; the card underneath keeps its size. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          borderRadius: radius,
+          boxShadow: DROP_RING,
+          opacity: dragging ? 1 : 0,
+          transition: "opacity 240ms var(--ease-ui)",
+        }}
+      />
+
       {phase.kind === "idle" ? (
-        <div className="flex h-full flex-col items-center justify-center">
+        <div className="flex h-full flex-col items-center justify-center gap-4">
           <PreenMark
             size={40}
             height={47}
             style={{
               transform: dragging ? "scale(1.15)" : "scale(1)",
               color: dragging ? "var(--color-accent)" : "var(--color-feather)",
-              transition:
-                "transform 180ms cubic-bezier(0.22,1,0.36,1), color 180ms ease-out",
+              transition: "transform 180ms var(--ease-enter), color 180ms var(--ease-ui)",
             }}
           />
-          <p className="mt-3 text-[12px] text-[var(--color-ink-2)]">
+          <p className="text-[12px] font-medium tracking-[0.01em] text-[#40635f]">
             {dragging ? "Loslassen" : "Bild hierher ziehen"}
           </p>
         </div>
       ) : (
-        <div ref={content} className="content-in flex flex-col gap-[14px] p-4">
+        <div id="panel-content" className="content-in flex flex-col gap-[14px] p-4">
           {phase.kind === "done" ? (
             <Done
               result={phase.result}
@@ -397,56 +484,86 @@ export default function Panel() {
                 onRemove={startOver}
                 disabled={busy}
               />
-              <div className="hairline" />
+              <div style={{ height: 1, background: "var(--color-divider)" }} />
 
-              <div>
+              <div className="flex flex-col gap-[7px]">
                 <div
                   data-tauri-drag-region="false"
-                  className="grid grid-cols-2 gap-1 rounded-[15px] p-1"
+                  className="relative rounded-[15px] p-1"
                   style={{ background: "var(--color-quieter)" }}
                   role="radiogroup"
                   aria-label="Voreinstellung"
                 >
-                  {PRESETS.map((p) => {
-                    const active = p.name === preset.name;
-                    return (
-                      <button
-                        key={p.name}
-                        role="radio"
-                        aria-checked={active}
-                        disabled={busy}
-                        onClick={() => pickPreset(p)}
-                        className={`h-9 rounded-xl text-[13px] font-semibold ${
-                          active
-                            ? "bg-white text-[var(--color-ink)] shadow-[0_1px_3px_rgba(6,22,26,0.14)]"
-                            : "text-[var(--color-ink-2)]"
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
+                  {/* One body travelling between the two labels; swapping two
+                      backgrounds would jump every time. */}
+                  <span
+                    aria-hidden
+                    className="absolute top-1 bottom-1 left-1 rounded-xl bg-white shadow-[0_1px_3px_rgba(6,22,26,0.2)]"
+                    style={{
+                      width: "calc(50% - 6px)",
+                      transform:
+                        preset.name === PRESETS[0].name
+                          ? "translateX(0)"
+                          : "translateX(calc(100% + 4px))",
+                      transition: "transform 380ms var(--ease-ui)",
+                    }}
+                  />
+                  <div className="relative grid grid-cols-2 gap-1">
+                    {PRESETS.map((p) => {
+                      const active = p.name === preset.name;
+                      return (
+                        <button
+                          key={p.name}
+                          role="radio"
+                          aria-checked={active}
+                          disabled={busy}
+                          onClick={() => pickPreset(p)}
+                          className="pressable h-9 rounded-xl text-[13px]"
+                          style={{
+                            color: active ? "var(--color-ink)" : "var(--color-ink-2)",
+                            fontWeight: active ? 700 : 500,
+                            transitionProperty: "transform, color, font-weight",
+                            transitionDuration: "140ms, 380ms, 380ms",
+                            transitionTimingFunction:
+                              "var(--ease-enter), var(--ease-ui), var(--ease-ui)",
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <p className="mt-1.5 text-center text-[11px] text-[var(--color-ink-3)] tabular-nums">
-                  {limits.maxWidth} px · max. {limits.maxKb} KB
-                  {limits.overridden && " (angepasst)"}
+                {phase.kind === "failed" ? (
+                  <p className="truncate pl-1 text-[11px] text-[#8c2f26]" title={phase.message}>
+                    {phase.message}
+                  </p>
+                ) : (
+                <p className="pl-1 text-[11px] text-[var(--color-ink-2)] tabular-nums">
+                  <Swap
+                    text={`${limits.maxWidth} px breit · höchstens ${limits.maxKb} KB${
+                      images.length > 1 ? " je Bild" : ""
+                    }${limits.overridden ? " (angepasst)" : ""}`}
+                    className="inline-block"
+                  />
                 </p>
+                )}
               </div>
 
-              <div>
+              <div className="flex flex-col gap-[7px]">
                 <label htmlFor="slug" className="label-caps">
                   Dateiname
                 </label>
                 <div
                   data-tauri-drag-region="false"
-                  className="mt-1.5 flex h-11 items-center rounded-[14px] bg-white/70 px-3 shadow-[inset_0_0_0_1px_var(--color-hairline)] focus-within:shadow-[inset_0_0_0_1.5px_var(--color-accent)]">
+                  className="flex h-11 items-center gap-1.5 rounded-[14px] bg-white/75 px-3 shadow-[inset_0_0_0_1px_var(--color-divider)] focus-within:shadow-[inset_0_0_0_1.5px_var(--color-accent)]"
+                >
                   <input
                     id="slug"
                     ref={slugInput}
                     value={slug}
                     disabled={busy}
                     spellCheck={false}
-                    autoFocus
                     onChange={(e) => {
                       setSlug(e.target.value);
                       setSlugTouched(true);
@@ -456,9 +573,10 @@ export default function Panel() {
                       else setSlug(await suggestSlug(slug));
                     }}
                     onKeyDown={(e) => e.key === "Enter" && run()}
-                    className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+                    placeholder="Name eingeben"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:font-normal placeholder:text-[var(--color-ink-3)]"
                   />
-                  <span className="pl-1 text-[13px] text-[var(--color-ink-3)]">
+                  <span className="shrink-0 text-[13px] font-medium text-[var(--color-ink-3)]">
                     {images.length > 1 ? `-1 … -${images.length}.webp` : ".webp"}
                   </span>
                 </div>
@@ -469,6 +587,7 @@ export default function Panel() {
                   <ChooserButton
                     icon={<FolderIcon />}
                     value={targetLabel(target)}
+                    title={targetTitle(target)}
                     active={popover === "target"}
                     disabled={busy}
                     onClick={() => setPopover(popover === "target" ? null : "target")}
@@ -485,93 +604,89 @@ export default function Panel() {
 
                 {images.length > 1 && outputDir && (
                   <p className="mt-1.5 text-[11px] text-[var(--color-ink-3)]">
-                    Unterordner{" "}
+                    legt darin den Ordner{" "}
                     <span className="font-semibold text-[var(--color-ink-2)]">
-                      {outputDir.split("/").pop()}
-                    </span>
+                      {outputDir.split("/").pop()}/
+                    </span>{" "}
+                    an
                   </p>
                 )}
 
-                {popover === "target" && (
-                  <Popover width={224} align="left">
-                    {targetNote && (
-                      <p className="px-3 pt-2 text-[11px] text-[var(--color-ink-3)]">{targetNote}</p>
-                    )}
-                    <TargetItem
-                      label="Quellordner"
-                      active={target === TARGET_SOURCE}
-                      onClick={() => {
-                        setTarget(TARGET_SOURCE);
-                        setPopover(null);
+                <Popover open={popover === "target"} width={224} align="left" label="Zielort">
+                  {targetNote && (
+                    <p className="px-3 pt-2 text-[11px] text-[var(--color-ink-3)]">{targetNote}</p>
+                  )}
+                  <div className="relative">
+                    {/* The selection is one pill that travels, not a highlight
+                        that reappears somewhere else. */}
+                    <span
+                      aria-hidden
+                      className="absolute inset-x-0 top-0 h-7 rounded-[10px]"
+                      style={{
+                        background: "var(--color-quiet)",
+                        opacity: activeTargetIndex < 0 ? 0 : 1,
+                        transform: `translateY(${Math.max(0, activeTargetIndex) * TARGET_ROW_HEIGHT}px)`,
+                        transition:
+                          "transform 280ms var(--ease-ui), opacity 160ms var(--ease-enter)",
                       }}
                     />
-                    <TargetItem
-                      label="Schreibtisch"
-                      active={target === TARGET_DESKTOP}
-                      onClick={() => {
-                        setTarget(TARGET_DESKTOP);
-                        setPopover(null);
-                      }}
-                    />
-                    {recent.map((path) => (
-                      <TargetItem
-                        key={path}
-                        label={path.split("/").pop() ?? path}
-                        hint="zuletzt"
-                        active={target === path}
-                        onClick={() => {
-                          setTarget(path);
-                          setPopover(null);
-                        }}
-                      />
-                    ))}
-                    <div className="my-1 hairline" />
-                    <TargetItem label="Anderen Ordner wählen …" onClick={chooseFolder} />
-                  </Popover>
-                )}
-
-                {popover === "fine" && (
-                  <Popover width={232} align="right">
-                    <div className="space-y-3 p-3">
-                      <Slider
-                        label="Breite"
-                        unit="px"
-                        {...WIDTH_RANGE}
-                        value={limits.maxWidth}
-                        onChange={setWidth}
-                      />
-                      <Slider
-                        label="Obergrenze"
-                        unit="KB"
-                        {...SIZE_RANGE}
-                        value={limits.maxKb}
-                        onChange={setMaxKb}
-                      />
-                      <div className="hairline" />
-                      <button
-                        onClick={() => {
-                          setWidth(preset.maxWidth);
-                          setMaxKb(preset.maxKb);
-                        }}
-                        className="w-full text-left text-[12px] font-semibold text-[var(--color-accent)]"
-                      >
-                        Auf {preset.label} zurücksetzen
-                      </button>
+                    <div className="relative">
+                      {targetOptions.map((option) => (
+                        <TargetItem
+                          key={option.value}
+                          label={option.label}
+                          hint={option.hint}
+                          active={option.value === target}
+                          onClick={() => {
+                            setTarget(option.value);
+                            setPopover(null);
+                          }}
+                        />
+                      ))}
                     </div>
-                  </Popover>
-                )}
-              </div>
+                  </div>
+                  <div className="my-1 hairline" />
+                  <TargetItem
+                    label="Anderen Ordner wählen …"
+                    icon={<FolderIcon size={13} className="text-[var(--color-ink-3)]" />}
+                    onClick={chooseFolder}
+                  />
+                </Popover>
 
-              {phase.kind === "failed" && (
-                <p className="rounded-xl bg-[rgba(176,58,46,0.1)] px-3 py-2 text-[11px] text-[#8c2f26]">
-                  {phase.message}
-                </p>
-              )}
+                <Popover open={popover === "fine"} width={232} align="right" label="Feineinstellung">
+                  <div className="space-y-3 p-3">
+                    <Slider
+                      label="Breite"
+                      unit="px"
+                      {...WIDTH_RANGE}
+                      value={limits.maxWidth}
+                      onChange={setWidth}
+                    />
+                    <Slider
+                      label="Obergrenze"
+                      unit="KB"
+                      {...SIZE_RANGE}
+                      value={limits.maxKb}
+                      onChange={setMaxKb}
+                    />
+                    <div className="hairline" />
+                    <button
+                      onClick={() => {
+                        setWidth(preset.maxWidth);
+                        setMaxKb(preset.maxKb);
+                      }}
+                      className="pressable w-full text-left text-[12px] font-semibold text-[var(--color-accent)]"
+                    >
+                      Auf {preset.label} zurücksetzen
+                    </button>
+                  </div>
+                </Popover>
+              </div>
 
               <button
                 onClick={run}
                 disabled={busy}
-                className="relative h-[46px] overflow-hidden rounded-2xl bg-[var(--color-accent)] text-[14px] font-semibold text-white disabled:opacity-80"
+                className="pressable relative h-[46px] overflow-hidden rounded-2xl bg-[var(--color-accent)] text-[14px] font-semibold text-white shadow-[0_4px_12px_rgba(6,22,26,0.22)] disabled:opacity-80"
               >
                 {busy && (
                   <span
@@ -580,7 +695,11 @@ export default function Panel() {
                   />
                 )}
                 <span className="relative">
-                  {busy ? `Verarbeite… ${phase.done} / ${phase.total}` : "Verarbeiten"}
+                  {busy
+                    ? `Verarbeite… ${phase.done} / ${phase.total}`
+                    : images.length > 1
+                      ? `${images.length} Bilder verarbeiten`
+                      : "Verarbeiten"}
                 </span>
               </button>
             </>
@@ -589,6 +708,16 @@ export default function Panel() {
       )}
     </div>
   );
+}
+
+/** Every row in the target menu is this tall, so the pill can simply travel. */
+const TARGET_ROW_HEIGHT = 28;
+
+/** The full path behind an abbreviated folder name. */
+function targetTitle(target: Target) {
+  if (target === TARGET_SOURCE) return "Neben dem Original";
+  if (target === TARGET_DESKTOP) return "Schreibtisch";
+  return target;
 }
 
 function targetLabel(target: Target) {
@@ -610,22 +739,24 @@ function Header(props: {
   return (
     <div className="flex items-center gap-3">
       <Thumb src={preview} />
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <p className="truncate text-[13px] font-semibold">
           {many ? `${images.length} Bilder` : first.name}
         </p>
         <p className="text-[11px] text-[var(--color-ink-2)] tabular-nums">
-          {many ? `zusammen ${kb(totalBytes)}` : `${first.width} × ${first.height} · ${kb(first.bytes ?? 0)}`}
+          {many
+            ? `zusammen ${kb(totalBytes)}`
+            : `${first.width} × ${first.height} px · ${kb(first.bytes ?? 0)}`}
         </p>
       </div>
       <button
         onClick={props.onRemove}
         disabled={props.disabled}
         aria-label="Bilder entfernen"
-        className="grid size-7 place-items-center rounded-full text-[var(--color-ink-3)]"
-        style={{ background: "var(--color-quiet)" }}
+        className="pressable grid size-7 shrink-0 place-items-center rounded-full text-[14px] leading-none text-[#40635f]"
+        style={{ background: "rgba(15,44,43,0.08)" }}
       >
-        <CloseIcon />
+        ×
       </button>
     </div>
   );
@@ -634,14 +765,15 @@ function Header(props: {
 function Thumb({ src, badge }: { src: string | null; badge?: boolean }) {
   return (
     <div className="relative shrink-0">
-      <div
-        className="size-[60px] overflow-hidden rounded-[18px] bg-white/60 shadow-[inset_0_0_0_1px_var(--color-hairline)]"
-      >
+      <div className="size-[60px] overflow-hidden rounded-[18px] bg-white/60 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)]">
         {src && <img src={src} alt="" className="size-full object-cover" />}
       </div>
       {badge && (
-        <span className="check-in absolute -right-1 -bottom-1 grid size-6 place-items-center rounded-full bg-[var(--color-accent)] text-white ring-[3px] ring-white">
-          <CheckIcon size={12} />
+        <span
+          className="check-in absolute -right-1 -bottom-1 grid size-6 place-items-center rounded-full bg-[var(--color-accent)] text-white"
+          style={{ boxShadow: "0 0 0 3px rgba(255,255,255,0.85)" }}
+        >
+          <CheckIcon size={12} strokeWidth={2.4} />
         </span>
       )}
     </div>
@@ -651,6 +783,8 @@ function Thumb({ src, badge }: { src: string | null; badge?: boolean }) {
 function ChooserButton(props: {
   icon: React.ReactNode;
   value: string;
+  /** Shown on hover — the folder name alone cannot carry a whole path. */
+  title?: string;
   dot?: boolean;
   active?: boolean;
   disabled?: boolean;
@@ -663,12 +797,13 @@ function ChooserButton(props: {
         props.onClick();
       }}
       disabled={props.disabled}
+      title={props.title}
       aria-expanded={props.active}
-      className="flex h-[38px] min-w-0 flex-1 items-center gap-1.5 rounded-[13px] px-2.5 text-[var(--color-ink-2)]"
+      className="pressable flex h-[38px] min-w-0 flex-1 items-center gap-[7px] rounded-[13px] pr-2 pl-2.5 text-left"
       style={{ background: "var(--color-quiet)" }}
     >
-      {props.icon}
-      <span className="min-w-0 flex-1 truncate text-right text-[12px] font-semibold text-[var(--color-ink)]">
+      <span className="shrink-0 text-[var(--color-accent)]">{props.icon}</span>
+      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--color-ink)]">
         {props.value}
       </span>
       {props.dot && <span className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />}
@@ -677,18 +812,39 @@ function ChooserButton(props: {
   );
 }
 
-function TargetItem(props: { label: string; hint?: string; active?: boolean; onClick: () => void }) {
+function TargetItem(props: {
+  label: string;
+  hint?: string;
+  active?: boolean;
+  /** Shown in place of the check mark, for the row that opens a dialog. */
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
         props.onClick();
       }}
-      className="flex w-full items-center gap-2 rounded-[10px] px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-quiet)]"
+      style={{ height: TARGET_ROW_HEIGHT }}
+      className="flex w-full items-center gap-2 rounded-[10px] pr-3 pl-2 text-left text-[12px] hover:bg-[rgba(15,44,43,0.04)]"
     >
-      <span className="min-w-0 flex-1 truncate">{props.label}</span>
+      {/* Fades out where it was and in where it now belongs. */}
+      <span
+        className="grid w-4 shrink-0 place-items-center"
+        style={{
+          opacity: props.active || props.icon ? 1 : 0,
+          transition: "opacity 160ms var(--ease-enter)",
+        }}
+      >
+        {props.icon ?? <CheckIcon size={12} strokeWidth={2} className="text-[var(--color-accent)]" />}
+      </span>
+      <span
+        className={`min-w-0 flex-1 truncate ${props.active ? "font-semibold" : ""}`}
+      >
+        {props.label}
+      </span>
       {props.hint && <span className="text-[10px] text-[var(--color-ink-3)]">{props.hint}</span>}
-      {props.active && <CheckIcon size={12} className="text-[var(--color-accent)]" />}
     </button>
   );
 }
@@ -705,8 +861,8 @@ function Slider(props: {
   const filled = ((props.value - props.min) / (props.max - props.min)) * 100;
   return (
     <div>
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] text-[var(--color-ink-2)]">{props.label}</span>
+      <div className="flex items-baseline justify-between pb-1">
+        <span className="text-[12px] text-[var(--color-ink-2)]">{props.label}</span>
         <span className="text-[12px] font-semibold tabular-nums">
           {props.value} {props.unit}
         </span>
@@ -741,46 +897,55 @@ function Done(props: {
   const used = limitBytes ? Math.min(100, (bytes / limitBytes) * 100) : 100;
   const first = files[0];
   const many = files.length > 1;
-  // The number and the bar share one ramp so they arrive together.
-  const ramp = useRamp();
+  // The bar starts first, the number follows it in; the percentage belongs to
+  // the number, not the bar.
+  const barRamp = useRamp(1500, 340);
+  const numberRamp = useRamp(1500, 440);
   const quality = useMemo(() => {
     const qualities = [...new Set(files.map((f) => f.quality))];
-    return qualities.length === 1 ? `Q${qualities[0]}` : `Q${Math.min(...qualities)}–${Math.max(...qualities)}`;
+    return qualities.length === 1
+      ? `Qualität ${qualities[0]}`
+      : `Qualität ${Math.min(...qualities)} bis ${Math.max(...qualities)}`;
   }, [files]);
 
   return (
     <>
       <div className="flex items-center gap-3">
         <Thumb src={props.preview} badge />
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <p className="truncate text-[13px] font-semibold">
             {many ? `${files.length} Dateien` : first?.fileName}
           </p>
           <p className="text-[11px] text-[var(--color-ink-2)] tabular-nums">
-            {first && `${first.width} × ${first.height} · ${quality}`}
+            {first && `${first.width} × ${first.height} px · ${quality}`}
           </p>
         </div>
       </div>
 
-      <div className="rounded-[20px] bg-white/[0.62] p-3">
+      <div
+        className="flex flex-col gap-[9px] rounded-[20px] bg-white/[0.62] px-3.5 py-[13px]"
+        style={{ boxShadow: "inset 0 0 0 1px rgba(15,44,43,0.1)" }}
+      >
         <div className="flex items-baseline gap-2">
-          <span className="text-[27px] leading-none font-semibold tabular-nums">
-            <Counting value={(bytes / 1000) * ramp} digits={bytes < 10000 ? 1 : 0} />
+          <span className="text-[27px] leading-none font-semibold tracking-[-0.02em] tabular-nums">
+            <Counting value={(bytes / 1000) * numberRamp} digits={bytes < 10000 ? 1 : 0} /> KB
           </span>
-          <span className="text-[11px] text-[var(--color-ink-3)]">KB</span>
-          <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">
+          <span className="text-[12px] text-[var(--color-ink-2)]">
             aus {kb(props.sourceBytes)}
           </span>
         </div>
-        <div className="mt-2.5 h-[7px] overflow-hidden rounded-full bg-[rgba(15,44,43,0.1)]">
+        <div
+          className="h-[7px] overflow-hidden rounded-full"
+          style={{ background: "var(--color-divider)" }}
+        >
           <div
             className="h-full rounded-full bg-[var(--color-accent)]"
-            style={{ width: `${used * ramp}%` }}
+            style={{ width: `${used * barRamp}%` }}
           />
         </div>
-        <div className="mt-1.5 flex justify-between text-[11px] text-[var(--color-ink-3)] tabular-nums">
-          <span>
-            <Counting value={used * ramp} digits={0} /> % genutzt
+        <div className="flex justify-between text-[10px] font-medium tracking-[0.02em] text-[var(--color-ink-2)]">
+          <span className="tabular-nums">
+            <Counting value={used * numberRamp} digits={0} /> % der Obergrenze
           </span>
           <span>{maxKb ? `Grenze ${maxKb} KB` : "ohne Grenze"}</span>
         </div>
@@ -795,13 +960,13 @@ function Done(props: {
       <div className="flex gap-2">
         <button
           onClick={() => first && revealItemInDir(many ? result.outputDir : first.path)}
-          className="h-11 flex-1 rounded-[14px] bg-white/70 text-[13px] font-semibold shadow-[inset_0_0_0_1px_var(--color-hairline)]"
+          className="pressable h-11 flex-1 rounded-[15px] bg-white/80 text-[13px] font-semibold shadow-[inset_0_0_0_1px_var(--color-divider)]"
         >
           Im Finder zeigen
         </button>
         <button
           onClick={props.onStartOver}
-          className="h-11 flex-1 rounded-[14px] bg-[var(--color-accent)] text-[13px] font-semibold text-white"
+          className="pressable h-11 flex-1 rounded-[15px] bg-[var(--color-accent)] text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(6,22,26,0.22)]"
         >
           Noch eins
         </button>

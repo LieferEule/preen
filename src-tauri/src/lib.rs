@@ -1,4 +1,5 @@
 mod corners;
+mod frame;
 pub mod imageio;
 mod naming;
 mod panel;
@@ -110,6 +111,18 @@ async fn inspect_images(paths: Vec<String>) -> InspectResult {
 #[tauri::command]
 fn suggest_slug(text: String) -> String {
     naming::slugify(&text)
+}
+
+/// The name suggested from an original's file name — empty when that name is
+/// a machine's (a timestamp, a counter, a uuid), because a folder called
+/// `hf-20260914-071304-3615fd4d` helps nobody.
+#[tauri::command]
+fn suggest_name(file_stem: String) -> String {
+    if naming::looks_machine_generated(&file_stem) {
+        String::new()
+    } else {
+        naming::slugify(&file_stem)
+    }
 }
 
 /// What a run would produce right now: output folder, file names and sizes.
@@ -252,21 +265,16 @@ fn hide_panel(app: AppHandle) {
     panel::hide(&app);
 }
 
-/// Resizes the panel. `animate` is used for the drop transition only.
+/// Resizes the panel. `duration_ms` of 0 snaps; the frontend passes 0 when the
+/// system asks for reduced motion.
 #[tauri::command]
-fn resize_panel(app: AppHandle, height: f64, loaded: bool, animate: bool) {
+fn resize_panel(app: AppHandle, height: f64, loaded: bool, duration_ms: u64) {
     let (width, radius) = if loaded {
         (panel::LOADED_WIDTH, panel::LOADED_RADIUS)
     } else {
         (panel::IDLE_SIZE.0, panel::IDLE_RADIUS)
     };
-    panel::resize(&app, width, height, radius, animate);
-}
-
-/// Hover and drag-over emphasis for the resting tile.
-#[tauri::command]
-fn emphasize_panel(app: AppHandle, scale: f64) {
-    panel::emphasize(&app, scale);
+    panel::resize(&app, width, height, radius, duration_ms);
 }
 
 /// Hiding a window from the frontend needs a window permission; going through
@@ -295,9 +303,39 @@ fn resize_settings_window(app: AppHandle, height: f64) {
     windows::resize_settings(&app, height);
 }
 
+/// Debug-only: lets the panel write what it measures into the app log.
+#[tauri::command]
+fn debug_log(message: String) {
+    #[cfg(debug_assertions)]
+    eprintln!("[preen] DOM {message}");
+    #[cfg(not(debug_assertions))]
+    let _ = message;
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+/// Image paths among the process arguments.
+fn image_arguments(args: &[String]) -> Vec<String> {
+    args.iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-') && pipeline::is_supported(Path::new(a)))
+        .cloned()
+        .collect()
+}
+
+/// Hands paths to the panel, once its window is listening.
+fn open_files(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        let _ = app.emit("preen://open-files", paths);
+    });
 }
 
 fn apply_activation_policy(app: &AppHandle, show_in_dock: bool) {
@@ -314,9 +352,12 @@ fn apply_activation_policy(app: &AppHandle, show_in_dock: bool) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // A second launch just brings the running panel up.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second launch brings the running panel up — and hands it any
+            // images that came with it ("Öffnen mit", or a path on the command
+            // line).
             panel::show(app);
+            open_files(app, image_arguments(&args));
         }))
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -330,6 +371,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             inspect_images,
             suggest_slug,
+            suggest_name,
             preview_output,
             process_images,
             thumbnail,
@@ -343,12 +385,12 @@ pub fn run() {
             show_panel,
             hide_panel,
             resize_panel,
-            emphasize_panel,
             hide_settings,
             set_auto_hide_seconds,
             open_settings_window,
             resize_settings_window,
-            quit_app
+            quit_app,
+            debug_log
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -369,6 +411,12 @@ pub fn run() {
             // After installation the app would otherwise look like it never
             // started, so the panel shows itself once. A background tool is
             // also expected to come back after a restart.
+            let arguments = image_arguments(&std::env::args().collect::<Vec<_>>());
+            if !arguments.is_empty() {
+                panel::show(&handle);
+                open_files(&handle, arguments);
+            }
+
             if settings::take_first_run(&handle) {
                 use tauri_plugin_autostart::ManagerExt;
                 let _ = handle.autolaunch().enable();

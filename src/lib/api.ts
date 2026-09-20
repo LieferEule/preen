@@ -55,6 +55,8 @@ export const inspectImages = (paths: string[]) =>
   invoke<{ images: ImageInfo[]; rejected: Rejected[] }>("inspect_images", { paths });
 
 export const suggestSlug = (text: string) => invoke<string>("suggest_slug", { text });
+/** The name suggested from an original's file name; empty for machine names. */
+export const suggestName = (fileStem: string) => invoke<string>("suggest_name", { fileStem });
 
 export const previewOutput = (args: {
   slug: string;
@@ -126,11 +128,9 @@ export const thumbnail = (path: string, size: number) =>
   invoke<string>("thumbnail", { path, size });
 
 export const hidePanel = () => invoke<void>("hide_panel");
-/** `animate` is the drop transition; every other size change snaps. */
-export const resizePanel = (height: number, loaded: boolean, animate: boolean) =>
-  invoke<void>("resize_panel", { height, loaded, animate });
-/** Hover and drag-over emphasis for the resting tile (1, 1.03, 1.06). */
-export const emphasizePanel = (scale: number) => invoke<void>("emphasize_panel", { scale });
+/** `durationMs` of 0 snaps — used for reduced motion and plain content changes. */
+export const resizePanel = (height: number, loaded: boolean, durationMs: number) =>
+  invoke<void>("resize_panel", { height, loaded, durationMs });
 export const openSettingsWindow = () => invoke<void>("open_settings_window");
 /** Hiding through a command works without a window permission. */
 export const hideSettings = () => invoke<void>("hide_settings");
@@ -139,9 +139,18 @@ export const setAutoHideSeconds = (seconds: number) =>
 export const resizeSettingsWindow = (height: number) =>
   invoke<void>("resize_settings_window", { height });
 export const quitApp = () => invoke<void>("quit_app");
+export const debugLog = (message: string) => invoke<void>("debug_log", { message });
 
 export const onPanelShown = (cb: () => void): Promise<UnlistenFn> =>
   listen("preen://panel-shown", () => cb());
+
+/** Images handed to the app from outside: "Öffnen mit", or a path on the command line. */
+export const onOpenFiles = (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
+  listen<string[]>("preen://open-files", (e) => cb(e.payload));
+
+/** The panel has been hidden long enough to drop what was loaded. */
+export const onForgetImages = (cb: () => void): Promise<UnlistenFn> =>
+  listen("preen://forget-images", () => cb());
 
 export const onSettingsChanged = (cb: () => void): Promise<UnlistenFn> =>
   listen("preen://settings-changed", () => cb());

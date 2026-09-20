@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Preen — Design-Referenz</title>
+<!--
+  PREEN DESIGN-REFERENZ
+  Verbindliche Werte für Panel und Einstellungsfenster.
+  Im Browser öffnen, um die Zustände zu sehen. Die Kachel oben links
+  reagiert auf Hover.
+
+  WICHTIG für die Umsetzung in der App:
+  - Die Schrift hier ist Instrument Sans, weil SF im Browser fehlt.
+    In der App wird die System-Schrift benutzt (system-ui).
+  - Das Milchglas hier ist per CSS gefälscht. In der App kommt es aus
+    NSVisualEffectView; die Farbverläufe unten liegen als Überzug
+    DARÜBER.
+
+  FARBEN
+    Text primär      #0f2c2b
+    Text sekundär    #4a6b69
+    Text tertiär     #7d9995
+    Akzentflächen    #2e6d63
+    Feder            #50988d
+    stille Fläche    rgba(15,44,43,0.06)
+    Wannen-Grund     rgba(15,44,43,0.07)
+    Trennlinie       rgba(15,44,43,0.12)
+    Haarlinie        rgba(15,44,43,0.09)
+
+  GLAS-ÜBERZUG
+    Panel            linear-gradient(180deg,
+                       rgba(255,255,255,0.82), rgba(228,239,237,0.60))
+    Einstellungen    linear-gradient(180deg,
+                       rgba(255,255,255,0.86), rgba(232,241,239,0.66))
+    Lichtkante       inset 0 1px 0 rgba(255,255,255,0.95)
+    Randlinie        inset 0 0 0 1px rgba(255,255,255,0.4)
+    Schatten         0 26px 60px rgba(6,22,26,0.42),
+                     0 3px 10px rgba(6,22,26,0.2)
+
+  MASSE
+    Kachel Ruhe      184 x 184, Radius 42
+    Panel geladen    340 breit, Radius 34, Innenabstand 16,
+                     Blockabstand 14
+    Einstellungen    560 breit, Radius 26, Titelbalken 46
+
+  BEWEGUNG
+    Standardkurve    cubic-bezier(0.33, 0, 0.2, 1)
+    Hover-Rand       box-shadow 240 ms
+    Aufgehen         Breite+Höhe 480 ms, Mitte und Oberkante fest;
+                     Inhalt scale(0.96)->1 + Deckkraft, 340 ms,
+                     120 ms verzögert
+    Umschalter       transform 380 ms, Schriftfarbe gleiche Dauer
+    Popover auf      scale(0.96)+6px -> 1, 260 ms, Ursprung am Knopf
+    Popover zu       180 ms
+    Haken            560 ms, 240 ms verzögert,
+                     cubic-bezier(0.34, 1.4, 0.64, 1)
+    Balken           1500 ms, 340 ms verzögert, Smoothstep
+    Zahl             1500 ms, 440 ms verzögert, Smoothstep
+    Smoothstep       p * p * (3 - 2 * p)
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+  body {
+    margin: 0;
+    padding: 48px;
+    font-family: 'Instrument Sans', system-ui, sans-serif;
+    background: linear-gradient(160deg, #14413f 0%, #0d2b33 55%, #091d24 100%);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 64px;
+  }
+  .caption {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 16px;
+  }
+  .glass {
+    background: linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(228,239,237,0.60) 100%);
+    backdrop-filter: blur(30px) saturate(180%);
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    box-shadow:
+      0 26px 60px rgba(6,22,26,0.42),
+      0 3px 10px rgba(6,22,26,0.2),
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      inset 0 0 0 1px rgba(255,255,255,0.4);
+  }
+  .tile {
+    box-shadow:
+      0 26px 60px rgba(6,22,26,0.42),
+      0 3px 10px rgba(6,22,26,0.2),
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      inset 0 0 0 1px rgba(255,255,255,0.4),
+      inset 0 0 0 1.5px rgba(46,109,99,0),
+      inset 0 0 30px -6px rgba(46,109,99,0);
+    transition: box-shadow 240ms cubic-bezier(0.33, 0, 0.2, 1);
+  }
+  .tile:hover {
+    box-shadow:
+      0 26px 60px rgba(6,22,26,0.42),
+      0 3px 10px rgba(6,22,26,0.2),
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      inset 0 0 0 1px rgba(255,255,255,0.4),
+      inset 0 0 0 1.5px rgba(46,109,99,0.45),
+      inset 0 0 30px -6px rgba(46,109,99,0.32);
+  }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 140px; height: 16px; border-radius: 9999px; cursor: pointer; display: block; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 5px; border-radius: 9999px; background: inherit; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin-top: -5px; border-radius: 9999px; background: #fff; box-shadow: 0 1px 4px rgba(6,22,26,0.4), inset 0 0 0 1px rgba(15,44,43,0.12); }
+</style>
+</head>
+<body>
+
+<!-- ============ 1 · RUHE (Hover ausprobieren) ============ -->
+<section>
+  <div class="caption">1 · Ruhe</div>
+  <div class="tile" style="width: 184px; height: 184px; border-radius: 42px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(228,239,237,0.60) 100%); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);">
+    <svg width="40" height="47" viewBox="0 0 12 14" fill="#50988d" shape-rendering="crispEdges" aria-hidden="true">
+      <rect x="6" y="0" width="2" height="1"></rect>
+      <rect x="5" y="1" width="4" height="1"></rect>
+      <rect x="4" y="2" width="2" height="1"></rect><rect x="7" y="2" width="3" height="1"></rect>
+      <rect x="4" y="3" width="2" height="1"></rect><rect x="7" y="3" width="4" height="1"></rect>
+      <rect x="3" y="4" width="3" height="1"></rect><rect x="7" y="4" width="4" height="1"></rect>
+      <rect x="3" y="5" width="3" height="1"></rect><rect x="7" y="5" width="4" height="1"></rect>
+      <rect x="3" y="6" width="3" height="1"></rect><rect x="7" y="6" width="3" height="1"></rect>
+      <rect x="4" y="7" width="2" height="1"></rect><rect x="7" y="7" width="3" height="1"></rect>
+      <rect x="4" y="8" width="2" height="1"></rect><rect x="7" y="8" width="2" height="1"></rect>
+      <rect x="5" y="9" width="1" height="1"></rect><rect x="7" y="9" width="1" height="1"></rect>
+      <rect x="6" y="10" width="2" height="1"></rect>
+      <rect x="6" y="11" width="2" height="1"></rect>
+      <rect x="6" y="12" width="2" height="1"></rect>
+      <rect x="6" y="13" width="2" height="1"></rect>
+    </svg>
+    <div style="font-size: 12px; font-weight: 500; letter-spacing: 0.01em; color: #40635f;">Bild hierher ziehen</div>
+  </div>
+</section>
+
+<!-- ============ 2 · GELADEN ============ -->
+<section>
+  <div class="caption">2 · Bild drin</div>
+  <div class="glass" style="width: 340px; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-radius: 34px;">
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="width: 60px; height: 60px; flex-shrink: 0; border-radius: 18px; background: linear-gradient(145deg, #c9a882 0%, #8f7a63 40%, #4e5b52 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);"></div>
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+        <div style="font-size: 13px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">IMG_4471.HEIC</div>
+        <div style="font-size: 11px; font-weight: 400; color: #4a6b69;">4032 × 3024 px · 30,8 MB</div>
+      </div>
+      <button type="button" aria-label="Bild entfernen" style="width: 28px; height: 28px; flex-shrink: 0; border: 0; border-radius: 9999px; background: rgba(15,44,43,0.08); color: #40635f; font-size: 14px; line-height: 1; cursor: pointer;">×</button>
+    </div>
+
+    <div style="height: 1px; background: rgba(15,44,43,0.12);"></div>
+
+    <!-- Umschalter: EIN weißer Körper, der rüberfährt -->
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="position: relative; display: flex; gap: 4px; padding: 4px; border-radius: 15px; background: rgba(15,44,43,0.07);">
+        <div style="position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 6px); border-radius: 12px; background: #ffffff; box-shadow: 0 1px 3px rgba(6,22,26,0.2); transform: translateX(0); transition: transform 380ms cubic-bezier(0.33, 0, 0.2, 1);"></div>
+        <button type="button" style="position: relative; z-index: 1; flex-grow: 1; flex-basis: 0; height: 36px; border: 0; border-radius: 12px; background: transparent; font-family: inherit; font-size: 13px; font-weight: 700; color: #0f2c2b; cursor: pointer; transition: color 380ms cubic-bezier(0.33, 0, 0.2, 1);">Inhaltsbild</button>
+        <button type="button" style="position: relative; z-index: 1; flex-grow: 1; flex-basis: 0; height: 36px; border: 0; border-radius: 12px; background: transparent; font-family: inherit; font-size: 13px; font-weight: 500; color: #4a6b69; cursor: pointer; transition: color 380ms cubic-bezier(0.33, 0, 0.2, 1);">Hero</button>
+      </div>
+      <div style="font-size: 11px; font-weight: 400; color: #4a6b69; padding-left: 4px;">1600 px breit · höchstens 260 KB</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <label for="ref-name" style="font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #4a6b69;">Dateiname</label>
+      <div style="display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 12px; border-radius: 14px; background: rgba(255,255,255,0.75); box-shadow: inset 0 0 0 1px rgba(15,44,43,0.12);">
+        <input id="ref-name" type="text" value="heimdecor-fromm-aus-wonfurt" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; outline: none; font-family: inherit; font-size: 13px; font-weight: 500; color: #0f2c2b;">
+        <span style="flex-shrink: 0; font-size: 13px; font-weight: 500; color: #7d9995;">.webp</span>
+      </div>
+    </div>
+
+    <!-- Ort und Fein: je 50 % -->
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="flex-grow: 1; flex-basis: 0; min-width: 0; display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 10px; border: 0; border-radius: 13px; background: rgba(15,44,43,0.06); font-family: inherit; text-align: left; cursor: pointer;">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#2e6d63" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;">
+          <path d="M2 4.2 A1.2 1.2 0 0 1 3.2 3 H6.2 L7.6 4.8 H12.8 A1.2 1.2 0 0 1 14 6 V12 A1.2 1.2 0 0 1 12.8 13.2 H3.2 A1.2 1.2 0 0 1 2 12 Z"></path>
+        </svg>
+        <span style="flex-grow: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Quellordner</span>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#7d9995" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;">
+          <path d="M5 6.5 L8 9.5 L11 6.5"></path>
+        </svg>
+      </button>
+      <button type="button" style="flex-grow: 1; flex-basis: 0; min-width: 0; display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 10px; border: 0; border-radius: 13px; background: rgba(15,44,43,0.06); font-family: inherit; text-align: left; cursor: pointer;">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#2e6d63" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="flex-shrink: 0;">
+          <path d="M2.5 4.5 H4.1"></path><path d="M7.9 4.5 H13.5"></path><circle cx="6" cy="4.5" r="1.9"></circle>
+          <path d="M2.5 11.5 H8.1"></path><path d="M11.9 11.5 H13.5"></path><circle cx="10" cy="11.5" r="1.9"></circle>
+        </svg>
+        <span style="flex-grow: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Fein</span>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#7d9995" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;">
+          <path d="M5 6.5 L8 9.5 L11 6.5"></path>
+        </svg>
+      </button>
+    </div>
+
+    <button type="button" style="height: 46px; border: 0; border-radius: 16px; background: #2e6d63; color: #ffffff; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(6,22,26,0.22);">Verarbeiten</button>
+
+  </div>
+</section>
+
+<!-- ============ 3 · FERTIG ============ -->
+<section>
+  <div class="caption">3 · Fertig (Endzustand)</div>
+  <div class="glass" style="width: 340px; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-radius: 34px;">
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="position: relative; width: 60px; height: 60px; flex-shrink: 0;">
+        <div style="width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(145deg, #c9a882 0%, #8f7a63 40%, #4e5b52 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);"></div>
+        <div style="position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 9999px; background: #2e6d63; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgba(255,255,255,0.85);">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 8.5 L6.5 12 L13 4.5"></path>
+          </svg>
+        </div>
+      </div>
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+        <div style="font-size: 13px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">heimdecor-fromm-aus-wonfurt.webp</div>
+        <div style="font-size: 11px; font-weight: 400; color: #4a6b69;">1600 × 1073 px · Qualität 80</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px 14px; border-radius: 20px; background: rgba(255,255,255,0.62); box-shadow: inset 0 0 0 1px rgba(15,44,43,0.1);">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <div style="font-size: 27px; font-weight: 600; letter-spacing: -0.02em; color: #0f2c2b; font-variant-numeric: tabular-nums;">172 KB</div>
+        <div style="font-size: 12px; font-weight: 400; color: #4a6b69;">aus 30,8 MB</div>
+      </div>
+      <div style="position: relative; height: 7px; border-radius: 9999px; background: rgba(15,44,43,0.12); overflow: hidden;">
+        <div style="position: absolute; top: 0; bottom: 0; left: 0; width: 66.15%; border-radius: 9999px; background: #2e6d63;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 500; letter-spacing: 0.02em; color: #4a6b69;">
+        <span style="font-variant-numeric: tabular-nums;">66 % der Obergrenze</span>
+        <span>Grenze 260 KB</span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: rgba(255,255,255,0.8); color: #0f2c2b; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(15,44,43,0.12);">Im Finder zeigen</button>
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: #2e6d63; color: #ffffff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(6,22,26,0.22);">Noch eins</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 4 · EINSTELLUNGEN ============ -->
+<section>
+  <div class="caption">4 · Einstellungen</div>
+  <div style="width: 560px; box-sizing: border-box; border-radius: 26px; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(232,241,239,0.66) 100%); backdrop-filter: blur(34px) saturate(180%); -webkit-backdrop-filter: blur(34px) saturate(180%); box-shadow: 0 30px 70px rgba(6,22,26,0.46), 0 4px 12px rgba(6,22,26,0.22), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.4);">
+
+    <div style="position: relative; display: flex; align-items: center; height: 46px; padding: 0 16px; box-shadow: inset 0 -1px 0 rgba(15,44,43,0.1);">
+      <div style="display: flex; gap: 8px;">
+        <button type="button" aria-label="Schließen" style="width: 12px; height: 12px; padding: 0; border: 0; border-radius: 9999px; background: #ec6a5e; cursor: pointer;"></button>
+        <button type="button" aria-label="Minimieren" disabled style="width: 12px; height: 12px; padding: 0; border: 0; border-radius: 9999px; background: rgba(15,44,43,0.16);"></button>
+        <button type="button" aria-label="Vollbild" disabled style="width: 12px; height: 12px; padding: 0; border: 0; border-radius: 9999px; background: rgba(15,44,43,0.16);"></button>
+      </div>
+      <div style="position: absolute; left: 0; right: 0; text-align: center; font-size: 13px; font-weight: 600; color: #0f2c2b; pointer-events: none;">Einstellungen</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; padding: 20px 22px 18px 22px; gap: 4px;">
+
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0;">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 13.5px; font-weight: 600; color: #0f2c2b;">Tastenkürzel</div>
+          <div style="font-size: 11.5px; font-weight: 400; color: #4a6b69;">Holt das Panel nach vorn</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; justify-content: center; height: 32px; min-width: 70px; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,0.9); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: #0f2c2b; box-shadow: inset 0 0 0 1px rgba(15,44,43,0.14), 0 1px 2px rgba(6,22,26,0.1);">⌥⌘P</div>
+          <button type="button" style="height: 32px; padding: 0 13px; border: 0; border-radius: 10px; background: rgba(15,44,43,0.07); font-family: inherit; font-size: 12.5px; font-weight: 600; color: #234744; cursor: pointer;">Ändern</button>
+        </div>
+      </div>
+
+      <div style="height: 1px; background: rgba(15,44,43,0.09);"></div>
+
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0;">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 13.5px; font-weight: 600; color: #0f2c2b;">Standard-Zielort</div>
+          <div style="font-size: 11.5px; font-weight: 400; color: #4a6b69;">Lässt sich im Panel pro Bild überschreiben</div>
+        </div>
+        <button type="button" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 32px; padding: 0 10px 0 12px; border: 0; border-radius: 10px; background: rgba(255,255,255,0.9); font-family: inherit; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(15,44,43,0.14);">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#2e6d63" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 4.2 A1.2 1.2 0 0 1 3.2 3 H6.2 L7.6 4.8 H12.8 A1.2 1.2 0 0 1 14 6 V12 A1.2 1.2 0 0 1 12.8 13.2 H3.2 A1.2 1.2 0 0 1 2 12 Z"></path>
+          </svg>
+          <span style="font-size: 12.5px; font-weight: 600; color: #0f2c2b;">Neben dem Original</span>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#7d9995" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 6.5 L8 9.5 L11 6.5"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div style="height: 1px; background: rgba(15,44,43,0.09);"></div>
+
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0;">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 13.5px; font-weight: 600; color: #0f2c2b;">Im Dock anzeigen</div>
+          <div style="font-size: 11.5px; font-weight: 400; color: #4a6b69;">Aus heißt: Preen lebt nur in der Menüleiste</div>
+        </div>
+        <button type="button" role="switch" aria-checked="false" aria-label="Im Dock anzeigen" style="position: relative; flex-shrink: 0; width: 44px; height: 26px; border: 0; border-radius: 9999px; background: rgba(15,44,43,0.18); cursor: pointer;">
+          <span style="position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 9999px; background: #ffffff; box-shadow: 0 1px 3px rgba(6,22,26,0.3);"></span>
+        </button>
+      </div>
+
+      <div style="height: 1px; background: rgba(15,44,43,0.09);"></div>
+
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0;">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 13.5px; font-weight: 600; color: #0f2c2b;">Bei Anmeldung starten</div>
+          <div style="font-size: 11.5px; font-weight: 400; color: #4a6b69;">Damit das Kürzel immer sitzt</div>
+        </div>
+        <button type="button" role="switch" aria-checked="true" aria-label="Bei Anmeldung starten" style="position: relative; flex-shrink: 0; width: 44px; height: 26px; border: 0; border-radius: 9999px; background: #2e6d63; cursor: pointer;">
+          <span style="position: absolute; top: 3px; left: 21px; width: 20px; height: 20px; border-radius: 9999px; background: #ffffff; box-shadow: 0 1px 3px rgba(6,22,26,0.3);"></span>
+        </button>
+      </div>
+
+      <div style="height: 1px; background: rgba(15,44,43,0.09);"></div>
+
+      <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0;">
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;">
+          <label for="ref-autohide" style="font-size: 13.5px; font-weight: 600; color: #0f2c2b;">Automatisch ausblenden</label>
+          <div style="font-size: 11.5px; font-weight: 400; color: #4a6b69;">Nur solange kein Bild geladen ist</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+          <div style="position: relative; width: 140px;">
+            <input id="ref-autohide" type="range" min="0" max="4" step="1" value="1" aria-valuetext="10 Sekunden" style="background: linear-gradient(90deg, #2e6d63 0 25%, rgba(15,44,43,0.16) 25% 100%);">
+            <div style="position: absolute; left: 0; top: 17px; width: 140px; height: 4px;">
+              <span style="position: absolute; left: 8px; width: 1px; height: 4px; background: rgba(15,44,43,0.2);"></span>
+              <span style="position: absolute; left: 39px; width: 1px; height: 4px; background: rgba(15,44,43,0.2);"></span>
+              <span style="position: absolute; left: 70px; width: 1px; height: 4px; background: rgba(15,44,43,0.2);"></span>
+              <span style="position: absolute; left: 101px; width: 1px; height: 4px; background: rgba(15,44,43,0.2);"></span>
+              <span style="position: absolute; left: 133px; width: 1px; height: 4px; background: rgba(15,44,43,0.2);"></span>
+            </div>
+          </div>
+          <span style="width: 46px; text-align: right; font-size: 12.5px; font-weight: 600; color: #0f2c2b; font-variant-numeric: tabular-nums;">10 s</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; padding: 13px 22px; background: rgba(15,44,43,0.05); box-shadow: inset 0 1px 0 rgba(15,44,43,0.09);">
+      <svg width="15" height="17.5" viewBox="0 0 12 14" fill="#50988d" shape-rendering="crispEdges" aria-hidden="true" style="flex-shrink: 0;">
+        <rect x="6" y="0" width="2" height="1"></rect>
+        <rect x="5" y="1" width="4" height="1"></rect>
+        <rect x="4" y="2" width="2" height="1"></rect><rect x="7" y="2" width="3" height="1"></rect>
+        <rect x="4" y="3" width="2" height="1"></rect><rect x="7" y="3" width="4" height="1"></rect>
+        <rect x="3" y="4" width="3" height="1"></rect><rect x="7" y="4" width="4" height="1"></rect>
+        <rect x="3" y="5" width="3" height="1"></rect><rect x="7" y="5" width="4" height="1"></rect>
+        <rect x="3" y="6" width="3" height="1"></rect><rect x="7" y="6" width="3" height="1"></rect>
+        <rect x="4" y="7" width="2" height="1"></rect><rect x="7" y="7" width="3" height="1"></rect>
+        <rect x="4" y="8" width="2" height="1"></rect><rect x="7" y="8" width="2" height="1"></rect>
+        <rect x="5" y="9" width="1" height="1"></rect><rect x="7" y="9" width="1" height="1"></rect>
+        <rect x="6" y="10" width="2" height="1"></rect>
+        <rect x="6" y="11" width="2" height="1"></rect>
+        <rect x="6" y="12" width="2" height="1"></rect>
+        <rect x="6" y="13" width="2" height="1"></rect>
+      </svg>
+      <span style="flex-grow: 1; font-size: 11.5px; font-weight: 400; color: #4a6b69;">Preen [VERSION]</span>
+      <button type="button" style="height: 30px; padding: 0 13px; border: 0; border-radius: 10px; background: transparent; font-family: inherit; font-size: 12.5px; font-weight: 600; color: #3e5c59; cursor: pointer;">Preen beenden</button>
+    </div>
+
+  </div>
+</section>
+
+</body>
+</html>

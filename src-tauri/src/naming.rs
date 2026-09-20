@@ -107,6 +107,52 @@ pub fn plan_base_names<'a>(
         .collect()
 }
 
+/// True when a file name reads like a machine wrote it: `IMG_20260914_071304`,
+/// `3615fd4d-9c11-4f0e-...`, plain counters. Such a name makes a useless folder
+/// name, so the panel leaves the field empty and shows a placeholder instead.
+pub fn looks_machine_generated(file_stem: &str) -> bool {
+    let slug = slugify(file_stem);
+    if slug == FALLBACK_SLUG {
+        return true;
+    }
+    let tokens: Vec<&str> = slug.split('-').filter(|t| !t.is_empty()).collect();
+    if tokens.is_empty() {
+        return true;
+    }
+    // Screenshots and camera exports: the prefix carries no meaning either.
+    const MACHINE_PREFIXES: [&str; 9] = [
+        "bildschirmfoto",
+        "screenshot",
+        "screen",
+        "img",
+        "dsc",
+        "dscf",
+        "dji",
+        "gopr",
+        "pxl",
+    ];
+    if MACHINE_PREFIXES.contains(&tokens[0]) && tokens[1..].iter().any(|t| all_digits(t)) {
+        return true;
+    }
+    // Nothing but digits: a counter or a timestamp.
+    if tokens.iter().all(|t| all_digits(t)) {
+        return true;
+    }
+    // A hex run that long is an id, not a word.
+    if tokens
+        .iter()
+        .any(|t| t.len() >= 12 && t.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return true;
+    }
+    // Two or more long number groups: date plus time, or an export counter.
+    tokens
+        .iter()
+        .filter(|t| t.len() >= 6 && all_digits(t))
+        .count()
+        >= 2
+}
+
 fn all_digits(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
@@ -165,6 +211,25 @@ mod tests {
         );
         let one_word = slugify(&"x".repeat(100));
         assert_eq!(one_word.len(), MAX_SLUG_LEN);
+    }
+
+    #[test]
+    fn machine_names_are_recognised() {
+        assert!(looks_machine_generated("20260914_071304"));
+        assert!(looks_machine_generated("hf-20260914-071304-3615fd4d-6b21"));
+        assert!(looks_machine_generated("3615fd4d9c114f0e8a77"));
+        assert!(looks_machine_generated("0042"));
+        assert!(looks_machine_generated("Bildschirmfoto 2026-09-17 um 21.53.33"));
+        assert!(looks_machine_generated("IMG_4471"));
+        assert!(looks_machine_generated("DSC_0001"));
+        assert!(looks_machine_generated("   "));
+    }
+
+    #[test]
+    fn ordinary_names_are_kept() {
+        assert!(!looks_machine_generated("Teppich Wohnzimmer Fromm"));
+        assert!(!looks_machine_generated("Laden-2026"));
+        assert!(!looks_machine_generated("Hausdecor Fromm 03"));
     }
 
     #[test]

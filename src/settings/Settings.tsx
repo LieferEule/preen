@@ -3,8 +3,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import { desktopDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as autostartEnabled } from "@tauri-apps/plugin-autostart";
+import { Popover } from "../components/Popover";
 import PreenMark from "../components/icons/PreenMark";
-import { ChevronIcon, FolderIcon } from "../components/icons/Glyphs";
+import { CheckIcon, ChevronIcon, FolderIcon } from "../components/icons/Glyphs";
 import {
   TARGET_DESKTOP,
   TARGET_SOURCE,
@@ -30,6 +31,7 @@ export default function Settings() {
   const [dock, setDock] = useState(false);
   const [autostart, setAutostart] = useState(true);
   const [autoHide, setAutoHide] = useState(20);
+  const [targetMenu, setTargetMenu] = useState(false);
   const [version, setVersion] = useState("");
   const root = useRef<HTMLDivElement>(null);
 
@@ -93,26 +95,20 @@ export default function Settings() {
     return () => window.removeEventListener("keydown", onKey);
   }, [recording]);
 
-  const chooseTarget = async () => {
+  const pickTarget = (value: Target) => {
+    setTarget(value);
+    setDefaultTarget(value);
+    setTargetMenu(false);
+  };
+
+  const chooseFolder = async () => {
     const dir = await open({ directory: true });
     if (typeof dir === "string") {
       setTarget(dir);
       setDefaultTarget(dir);
       rememberTarget(dir);
     }
-  };
-
-  const cycleTarget = async () => {
-    // Quellordner → Schreibtisch → eigener Ordner …
-    if (target === TARGET_SOURCE) {
-      setTarget(TARGET_DESKTOP);
-      setDefaultTarget(TARGET_DESKTOP);
-    } else if (target === TARGET_DESKTOP) {
-      await chooseTarget();
-    } else {
-      setTarget(TARGET_SOURCE);
-      setDefaultTarget(TARGET_SOURCE);
-    }
+    setTargetMenu(false);
   };
 
   const toggleDock = (value: boolean) => {
@@ -130,10 +126,22 @@ export default function Settings() {
   };
 
   return (
-    <div ref={root} className="glass-body overflow-hidden rounded-[26px]">
+    <div
+      ref={root}
+      className="overflow-hidden rounded-[26px]"
+      style={{
+        background:
+          "linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(232,241,239,0.66) 100%)",
+        boxShadow:
+          "0 30px 70px rgba(6,22,26,0.46), 0 4px 12px rgba(6,22,26,0.22), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.4)",
+      }}
+    >
       {/* "deep": a press anywhere in the bar drags the window; Tauri keeps
           buttons out of it by itself. */}
-      <div className="relative h-[46px]">
+      <div
+        className="relative h-[46px]"
+        style={{ boxShadow: "inset 0 -1px 0 rgba(15,44,43,0.1)" }}
+      >
         {/* The drag surface is its own layer across the whole bar. The buttons
             sit above it as siblings, so neither can swallow the other. */}
         <div data-tauri-drag-region className="absolute inset-0" />
@@ -145,31 +153,39 @@ export default function Settings() {
             type="button"
             onClick={() => hideSettings()}
             aria-label="Schließen"
-            className="size-3 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12)]"
+            className="size-3 rounded-full bg-[#ec6a5e]"
           />
           {/* Resizing and full screen make no sense for this window. */}
           <button
             type="button"
             disabled
             aria-label="Minimieren"
-            className="size-3 rounded-full bg-[rgba(15,44,43,0.14)]"
+            className="size-3 rounded-full bg-[rgba(15,44,43,0.16)]"
           />
           <button
             type="button"
             disabled
             aria-label="Vollbild"
-            className="size-3 rounded-full bg-[rgba(15,44,43,0.14)]"
+            className="size-3 rounded-full bg-[rgba(15,44,43,0.16)]"
           />
         </div>
       </div>
 
-      <div className="px-5">
-        <Row label="Tastenkürzel">
+      <div className="flex flex-col gap-1 px-[22px] pt-5 pb-[18px]">
+        <Row label="Tastenkürzel" hint="Holt das Panel nach vorn">
           <div className="flex items-center gap-2">
             <kbd
-              className={`min-w-14 rounded-lg px-2.5 py-1 text-center text-[13px] font-semibold ${
-                recording ? "bg-[var(--color-accent)] text-white" : "bg-white/80 text-[var(--color-ink)]"
-              } shadow-[inset_0_0_0_1px_var(--color-hairline)]`}
+              className={`grid h-8 min-w-[70px] place-items-center rounded-[10px] px-3 text-[14px] font-semibold tracking-[0.06em] ${
+                recording ? "bg-[var(--color-accent)] text-white" : "bg-white/90 text-[var(--color-ink)]"
+              }`}
+              style={
+                recording
+                  ? undefined
+                  : {
+                      boxShadow:
+                        "inset 0 0 0 1px rgba(15,44,43,0.14), 0 1px 2px rgba(6,22,26,0.1)",
+                    }
+              }
             >
               {recording ? "Tasten drücken…" : label}
             </kbd>
@@ -178,8 +194,8 @@ export default function Settings() {
                 setError(null);
                 setRecording((r) => !r);
               }}
-              className="rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[var(--color-accent)]"
-              style={{ background: "var(--color-quiet)" }}
+              className="pressable h-8 rounded-[10px] px-[13px] text-[12.5px] font-semibold text-[#234744]"
+              style={{ background: "rgba(15,44,43,0.07)" }}
             >
               {recording ? "Abbrechen" : "Ändern"}
             </button>
@@ -191,23 +207,51 @@ export default function Settings() {
           </p>
         )}
 
-        <Row label="Standard-Zielort">
-          <button onClick={cycleTarget} className="flex items-center gap-2 text-[13px] font-semibold">
-            <FolderIcon className="text-[var(--color-ink-3)]" />
-            <span className="max-w-52 truncate">{targetLabel(target)}</span>
-            <ChevronIcon className="text-[var(--color-ink-3)]" />
-          </button>
+        <Row label="Standard-Zielort" hint="Lässt sich im Panel pro Bild überschreiben">
+          <div className="relative">
+            <button
+              onClick={() => setTargetMenu((open) => !open)}
+              aria-expanded={targetMenu}
+              title={targetTitle(target)}
+              className="pressable flex h-8 shrink-0 items-center gap-2 rounded-[10px] bg-white/90 pr-2.5 pl-3"
+              style={{ boxShadow: "inset 0 0 0 1px rgba(15,44,43,0.14)" }}
+            >
+              <FolderIcon size={14} className="text-[var(--color-accent)]" />
+              <span className="max-w-52 truncate text-[12.5px] font-semibold">
+                {targetLabel(target)}
+              </span>
+              <ChevronIcon className="text-[var(--color-ink-3)]" />
+            </button>
+            <Popover open={targetMenu} width={224} align="right" label="Standard-Zielort">
+              <MenuItem
+                label="Neben dem Original"
+                active={target === TARGET_SOURCE}
+                onClick={() => pickTarget(TARGET_SOURCE)}
+              />
+              <MenuItem
+                label="Schreibtisch"
+                active={target === TARGET_DESKTOP}
+                onClick={() => pickTarget(TARGET_DESKTOP)}
+              />
+              <div className="my-1" style={{ height: 1, background: "var(--color-hair-soft)" }} />
+              <MenuItem
+                label="Anderen Ordner wählen …"
+                icon={<FolderIcon size={13} className="text-[var(--color-ink-3)]" />}
+                onClick={chooseFolder}
+              />
+            </Popover>
+          </div>
         </Row>
 
-        <Row label="Im Dock anzeigen">
+        <Row label="Im Dock anzeigen" hint="Aus heißt: Preen lebt nur in der Menüleiste">
           <Switch checked={dock} onChange={toggleDock} label="Im Dock anzeigen" />
         </Row>
 
-        <Row label="Bei Anmeldung starten">
+        <Row label="Bei Anmeldung starten" hint="Damit das Kürzel immer sitzt">
           <Switch checked={autostart} onChange={toggleAutostart} label="Bei Anmeldung starten" />
         </Row>
 
-        <Row label="Automatisch ausblenden" htmlFor="auto-hide" last>
+        <Row label="Automatisch ausblenden" hint="Nur solange kein Bild geladen ist" htmlFor="auto-hide" last>
           <AutoHideSlider
             value={autoHide}
             onChange={(seconds) => {
@@ -219,14 +263,17 @@ export default function Settings() {
       </div>
 
       <div
-        className="flex items-center gap-2 px-5 py-3"
-        style={{ background: "rgba(15, 44, 43, 0.05)" }}
+        className="flex items-center gap-3 px-[22px] py-[13px]"
+        style={{
+          background: "rgba(15,44,43,0.05)",
+          boxShadow: "inset 0 1px 0 rgba(15,44,43,0.09)",
+        }}
       >
-        <PreenMark size={14} height={16} className="text-[var(--color-feather)]" />
-        <span className="text-[11px] text-[var(--color-ink-3)]">Preen {version}</span>
+        <PreenMark size={15} height={17.5} className="shrink-0 text-[var(--color-feather)]" />
+        <span className="flex-1 text-[11.5px] text-[var(--color-ink-2)]">Preen {version}</span>
         <button
           onClick={quitApp}
-          className="ml-auto text-[12px] font-semibold text-[var(--color-ink-2)]"
+          className="pressable h-[30px] rounded-[10px] px-[13px] text-[12.5px] font-semibold text-[#3e5c59]"
         >
           Preen beenden
         </button>
@@ -261,7 +308,7 @@ function AutoHideSlider(props: { value: number; onChange: (seconds: number) => v
   );
   const filled = (notch / (AUTO_HIDE_STEPS.length - 1)) * 100;
   return (
-    <div className="flex items-center gap-3" style={{ width: 200 }}>
+    <div className="flex shrink-0 items-center gap-2.5">
       <div className="relative" style={{ width: 140 }}>
         <input
           id="auto-hide"
@@ -278,7 +325,7 @@ function AutoHideSlider(props: { value: number; onChange: (seconds: number) => v
           }}
         />
         {/* One mark per notch, lined up with where the knob comes to rest. */}
-        <div className="pointer-events-none absolute inset-x-0 top-[17px]">
+        <div className="pointer-events-none absolute inset-x-0 top-[18px]">
           {AUTO_HIDE_STEPS.map((step, i) => (
             <span
               key={step}
@@ -292,7 +339,7 @@ function AutoHideSlider(props: { value: number; onChange: (seconds: number) => v
         </div>
       </div>
       <span
-        className="text-right tabular-nums"
+        className="shrink-0 text-right tabular-nums"
         style={{ width: 46, fontSize: "12.5px", fontWeight: 600 }}
       >
         {autoHideLabel(props.value)}
@@ -301,33 +348,73 @@ function AutoHideSlider(props: { value: number; onChange: (seconds: number) => v
   );
 }
 
+function MenuItem(props: {
+  label: string;
+  active?: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={props.onClick}
+      className="flex h-7 w-full items-center gap-2 rounded-[10px] pr-3 pl-2 text-left text-[12px] hover:bg-[rgba(15,44,43,0.04)]"
+    >
+      <span
+        className="grid w-4 shrink-0 place-items-center"
+        style={{
+          opacity: props.active || props.icon ? 1 : 0,
+          transition: "opacity 160ms var(--ease-enter)",
+        }}
+      >
+        {props.icon ?? <CheckIcon size={12} strokeWidth={2} className="text-[var(--color-accent)]" />}
+      </span>
+      <span className={`min-w-0 flex-1 truncate ${props.active ? "font-semibold" : ""}`}>
+        {props.label}
+      </span>
+    </button>
+  );
+}
+
+/** The full path behind an abbreviated folder name. */
+function targetTitle(target: Target) {
+  if (target === TARGET_SOURCE) return "Neben dem Original";
+  if (target === TARGET_DESKTOP) return "Schreibtisch";
+  return target;
+}
+
 function targetLabel(target: Target) {
-  if (target === TARGET_SOURCE) return "Quellordner";
+  if (target === TARGET_SOURCE) return "Neben dem Original";
   if (target === TARGET_DESKTOP) return "Schreibtisch";
   return target.split("/").pop() ?? target;
 }
 
 function Row(props: {
   label: string;
+  /** One line saying what the setting is for. */
+  hint: string;
   /** Ties the label to the control, for screen readers and click-to-focus. */
   htmlFor?: string;
   last?: boolean;
   children: React.ReactNode;
 }) {
+  const label = props.htmlFor ? (
+    <label htmlFor={props.htmlFor} className="text-[13.5px] font-semibold">
+      {props.label}
+    </label>
+  ) : (
+    <span className="text-[13.5px] font-semibold">{props.label}</span>
+  );
   return (
-    <div
-      className="flex items-center justify-between gap-4 py-[11px]"
-      style={props.last ? undefined : { boxShadow: "inset 0 -1px 0 rgba(15, 44, 43, 0.09)" }}
-    >
-      {props.htmlFor ? (
-        <label htmlFor={props.htmlFor} className="text-[13px]">
-          {props.label}
-        </label>
-      ) : (
-        <span className="text-[13px]">{props.label}</span>
-      )}
-      {props.children}
-    </div>
+    <>
+      <div className="flex items-center gap-4 py-[11px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {label}
+          <p className="text-[11.5px] text-[var(--color-ink-2)]">{props.hint}</p>
+        </div>
+        {props.children}
+      </div>
+      {!props.last && <div style={{ height: 1, background: "var(--color-hair-soft)" }} />}
+    </>
   );
 }
 
@@ -338,14 +425,15 @@ function Switch(props: { checked: boolean; label: string; onChange: (value: bool
       aria-checked={props.checked}
       aria-label={props.label}
       onClick={() => props.onChange(!props.checked)}
-      className={`relative h-[26px] w-[44px] rounded-full transition-colors ${
-        props.checked ? "bg-[var(--color-accent)]" : "bg-[rgba(15,44,43,0.16)]"
+      className={`relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-[240ms] ${
+        props.checked ? "bg-[var(--color-accent)]" : "bg-[rgba(15,44,43,0.18)]"
       }`}
     >
       <span
-        className={`absolute top-[3px] size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(6,22,26,0.3)] transition-[left] ${
+        className={`absolute top-[3px] size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(6,22,26,0.3)] transition-[left] duration-[240ms] ${
           props.checked ? "left-[21px]" : "left-[3px]"
         }`}
+        style={{ transitionTimingFunction: "var(--ease-ui)" }}
       />
     </button>
   );

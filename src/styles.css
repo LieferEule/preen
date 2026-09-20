@@ -12,9 +12,19 @@
   --color-quiet: rgba(15, 44, 43, 0.06);
   --color-quieter: rgba(15, 44, 43, 0.07);
   --color-hairline: rgba(15, 44, 43, 0.12);
+  --color-divider: rgba(15, 44, 43, 0.12);
   --color-hair-soft: rgba(15, 44, 43, 0.09);
 
   --font-sans: system-ui, -apple-system, "SF Pro Text", sans-serif;
+
+  /* One curve for everything that moves on screen, so the whole panel shares
+     the same acceleration. */
+  --ease-ui: cubic-bezier(0.33, 0, 0.2, 1);
+  /* Entering and leaving needs a curve that starts at speed, or it reads as
+     sluggish; --ease-ui starts from standstill. */
+  --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
+  /* The one overshoot in the app: the finished check. */
+  --ease-pop: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 html,
@@ -22,6 +32,9 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* Nothing may scroll: a scrolled document once pushed the panel's header out
+     of the window. The focus call passes preventScroll as well. */
+  overflow: hidden;
   background: transparent;
   color: var(--color-ink);
   font-family: var(--font-sans);
@@ -47,7 +60,7 @@ button:not(:disabled) {
    panel asks for h-full itself. */
 @utility glass-body {
   position: relative;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.56));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(232, 241, 239, 0.66));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     inset 0 0 0 1px rgba(255, 255, 255, 0.4),
@@ -68,49 +81,70 @@ button:not(:disabled) {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-ink-3);
+  color: var(--color-ink-2);
 }
 
-/* Popovers only fade; nothing in this app slides or bounces except the two
-   moments the design calls for. */
-@utility pop {
-  animation: pop-in 140ms ease-out;
-}
 
-@keyframes pop-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 
 /* The drop: content arrives just after the window has started growing. */
 @utility content-in {
-  animation: content-in 260ms ease-out 90ms both;
+  animation: content-in 340ms var(--ease-enter) 120ms both;
 }
 
 @keyframes content-in {
   from {
     opacity: 0;
+    transform: scale(0.96);
   }
   to {
     opacity: 1;
+    transform: scale(1);
   }
 }
 
-/* Done: the check pops once. */
+/* Done: the check pops once. It starts small but visible — nothing in the
+   real world appears out of nothing. */
 @utility check-in {
-  animation: check-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 140ms both;
+  animation: check-in 560ms var(--ease-pop) 240ms both;
 }
 
 @keyframes check-in {
   from {
-    transform: scale(0);
+    opacity: 0;
+    transform: scale(0.4);
   }
   to {
+    opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* The values line under the segmented control swaps rather than jumping. */
+@utility swap-out {
+  opacity: 0;
+  transition: opacity 140ms var(--ease-enter);
+}
+
+@utility swap-in {
+  animation: swap-in 240ms var(--ease-enter) both;
+}
+
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Every pressable surface answers the press. */
+@utility pressable {
+  transition: transform 140ms var(--ease-enter);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
   }
 }
 
@@ -129,14 +163,14 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 15px;
+  height: 16px;
   background: transparent;
 }
 
 input[type="range"]::-webkit-slider-runnable-track {
   height: 5px;
   border-radius: 999px;
-  background: var(--range-track, rgba(15, 44, 43, 0.16));
+  background: var(--range-track, rgba(15, 44, 43, 0.14));
 }
 
 input[type="range"]::-webkit-slider-thumb {

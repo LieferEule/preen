@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow};
 use tauri_nspanel::{
@@ -36,16 +36,18 @@ pub const LOADED_RADIUS: f64 = 34.0;
 const EDGE_MARGIN: f64 = 32.0;
 /// How far down the usable screen the panel starts out.
 const START_HEIGHT_FRACTION: f64 = 0.22;
-const GROW_DURATION: Duration = Duration::from_millis(320);
-const FRAME: Duration = Duration::from_millis(12);
 
-/// Bumped on every resize so a running animation stops when a newer one starts.
-static RESIZE_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Bumped on every move so only the last one in a burst is stored.
 static MOVE_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// While the app moves the panel itself (growing, emphasis), `Moved` events
 /// must not be mistaken for the user dragging it somewhere.
 static PROGRAMMATIC_MOVES: AtomicU64 = AtomicU64::new(0);
+/// Bumped whenever the panel is shown or hidden, so only the last hide can
+/// trigger the forgetting below.
+static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// A picture left in a hidden panel is forgotten after this long, so coming
+/// back hours later doesn't hand you yesterday's work.
+const FORGET_AFTER: Duration = Duration::from_secs(300);
 const POSITION_SAVE_DELAY: Duration = Duration::from_millis(300);
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -89,7 +91,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 /// Frosted glass behind the webview. The desktop shows through this, which
 /// CSS `backdrop-filter` cannot do.
 ///
-/// The `Active` state keeps the blur alive while the panel is not the key
+/// `Popover` is lighter than `HudWindow` and greys the desktop less. The
+/// `Active` state keeps the blur alive while the panel is not the key
 /// window — which, for a panel you click away from, is most of the time.
 /// Without it the material dulls as soon as focus moves, which reads as a bug.
 pub fn set_vibrancy(window: &WebviewWindow, radius: f64) {
@@ -98,7 +101,7 @@ pub fn set_vibrancy(window: &WebviewWindow, radius: f64) {
         let _ = clear_vibrancy(&window);
         let _ = apply_vibrancy(
             &window,
-            NSVisualEffectMaterial::HudWindow,
+            NSVisualEffectMaterial::Popover,
             Some(NSVisualEffectState::Active),
             Some(radius),
         );
@@ -107,13 +110,66 @@ pub fn set_vibrancy(window: &WebviewWindow, radius: f64) {
     });
 }
 
-pub fn is_visible(app: &AppHandle) -> bool {
+/// Everything below touches AppKit, which only tolerates the main thread.
+/// The global shortcut, the tray and the second-instance listener all call in
+/// from threads of their own, so every entry point hops over first.
+fn on_main(app: &AppHandle, work: impl FnOnce(&AppHandle) + Send + 'static) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || work(&app));
+}
+
+fn is_visible_on_main(app: &AppHandle) -> bool {
     app.get_webview_panel(PANEL_LABEL)
         .map(|p| p.is_visible())
         .unwrap_or(false)
 }
 
 pub fn show(app: &AppHandle) {
+    HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    on_main(app, show_now);
+}
+
+pub fn hide(app: &AppHandle) {
+    forget_later(app);
+    on_main(app, |app| {
+        if let Ok(panel) = app.get_webview_panel(PANEL_LABEL) {
+            panel.hide();
+        }
+    });
+}
+
+pub fn toggle(app: &AppHandle) {
+    let generation = HIDE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let app_for_forget = app.clone();
+    on_main(app, move |app| {
+        if is_visible_on_main(app) {
+            if let Ok(panel) = app.get_webview_panel(PANEL_LABEL) {
+                panel.hide();
+            }
+            if HIDE_GENERATION.load(Ordering::SeqCst) == generation {
+                forget_later(&app_for_forget);
+            }
+        } else {
+            show_now(app);
+        }
+    });
+}
+
+/// Tells the panel to drop the loaded picture, but only if it is still hidden
+/// when the time is up.
+fn forget_later(app: &AppHandle) {
+    let generation = HIDE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(FORGET_AFTER);
+        if HIDE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let _ = app.emit("preen://forget-images", ());
+    });
+}
+
+fn show_now(app: &AppHandle) {
     let Some(window) = app.get_webview_window(PANEL_LABEL) else {
         return;
     };
@@ -124,20 +180,6 @@ pub fn show(app: &AppHandle) {
         panel.make_key_and_order_front();
     }
     let _ = app.emit("preen://panel-shown", ());
-}
-
-pub fn hide(app: &AppHandle) {
-    if let Ok(panel) = app.get_webview_panel(PANEL_LABEL) {
-        panel.hide();
-    }
-}
-
-pub fn toggle(app: &AppHandle) {
-    if is_visible(app) {
-        hide(app);
-    } else {
-        show(app);
-    }
 }
 
 /// Where the panel appears: where the user last dragged it, or — the first
@@ -248,34 +290,6 @@ pub fn remember_position(app: &AppHandle) {
     });
 }
 
-/// Hover and drag-over emphasis: the window itself grows a little around its
-/// centre, so the frosted glass grows with it instead of a CSS transform
-/// being clipped at the window edge.
-pub fn emphasize(app: &AppHandle, scale: f64) {
-    let Some(window) = app.get_webview_window(PANEL_LABEL) else {
-        return;
-    };
-    let Some((current_width, current_height)) = logical_size(&window) else {
-        return;
-    };
-    let (target_width, target_height) = (IDLE_SIZE.0 * scale, IDLE_SIZE.1 * scale);
-    if (current_width - target_width).abs() < 0.5 {
-        return;
-    }
-    let Some(position) = logical_position(&window) else {
-        return;
-    };
-    mark_programmatic();
-    let _ = window.set_position(LogicalPosition {
-        x: position.x - (target_width - current_width) / 2.0,
-        y: position.y - (target_height - current_height) / 2.0,
-    });
-    let _ = window.set_size(LogicalSize {
-        width: target_width,
-        height: target_height,
-    });
-}
-
 /// The monitor containing the mouse pointer, falling back to the primary one.
 fn monitor_with_cursor(app: &AppHandle) -> Option<tauri::Monitor> {
     if let Ok(cursor) = app.cursor_position() {
@@ -296,77 +310,15 @@ fn monitor_with_cursor(app: &AppHandle) -> Option<tauri::Monitor> {
     app.primary_monitor().ok().flatten()
 }
 
-/// Grows or shrinks the panel, keeping its top edge in place (Tauri positions
-/// windows by their top-left corner, so only the size changes).
-///
-/// `animate` is the drop transition; everything else snaps.
-pub fn resize(app: &AppHandle, width: f64, height: f64, radius: f64, animate: bool) {
+/// Grows or shrinks the panel. The top edge and the horizontal centre stay
+/// put, so the panel opens outwards to both sides instead of unrolling to the
+/// right. `duration_ms` of 0 snaps (used for reduced motion and for plain
+/// content changes).
+pub fn resize(app: &AppHandle, width: f64, height: f64, radius: f64, duration_ms: u64) {
     let Some(window) = app.get_webview_window(PANEL_LABEL) else {
         return;
     };
-    let generation = RESIZE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     mark_programmatic();
-
-    let (from_width, from_height) = logical_size(&window).unwrap_or(IDLE_SIZE);
-
     set_vibrancy(&window, radius);
-
-    if !animate || (from_height - height).abs() < 1.0 {
-        let _ = window.set_size(LogicalSize { width, height });
-        keep_on_screen(app, &window, height);
-        crate::corners::round(&window, radius);
-        return;
-    }
-
-    let app = app.clone();
-    thread::spawn(move || {
-        let started = Instant::now();
-        let radius = radius;
-        loop {
-            if RESIZE_GENERATION.load(Ordering::SeqCst) != generation {
-                return;
-            }
-            let elapsed = started.elapsed();
-            let progress = (elapsed.as_secs_f64() / GROW_DURATION.as_secs_f64()).min(1.0);
-            let eased = ease_out_quint(progress);
-            let _ = window.set_size(LogicalSize {
-                width: from_width + (width - from_width) * eased,
-                height: from_height + (height - from_height) * eased,
-            });
-            if progress >= 1.0 {
-                break;
-            }
-            thread::sleep(FRAME);
-        }
-        keep_on_screen(&app, &window, height);
-        crate::corners::round(&window, radius);
-    });
-}
-
-/// After growing, pull the panel back onto the screen if it would hang off
-/// the bottom edge.
-fn keep_on_screen(app: &AppHandle, window: &WebviewWindow, height: f64) {
-    let (Some(monitor), Ok(position), Ok(scale)) = (
-        monitor_with_cursor(app),
-        window.outer_position(),
-        window.scale_factor(),
-    ) else {
-        return;
-    };
-    let monitor_scale = monitor.scale_factor();
-    let monitor_y = monitor.position().y as f64 / monitor_scale;
-    let monitor_height = monitor.size().height as f64 / monitor_scale;
-    let y = position.y as f64 / scale;
-    let lowest = monitor_y + monitor_height - height - EDGE_MARGIN;
-    if y > lowest {
-        let _ = window.set_position(LogicalPosition {
-            x: position.x as f64 / scale,
-            y: lowest.max(monitor_y + EDGE_MARGIN),
-        });
-    }
-}
-
-/// cubic-bezier(0.22, 1, 0.36, 1), the panel's drop curve.
-fn ease_out_quint(t: f64) -> f64 {
-    1.0 - (1.0 - t).powi(5)
+    crate::frame::set_size(&window, width, height, duration_ms, radius);
 }
