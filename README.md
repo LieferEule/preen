@@ -32,8 +32,7 @@ xattr -cr /Applications/Preen.app
 ```
 
 Der Befehl entfernt die Quarantäne-Markierung, die macOS an alles hängt, was
-aus dem Netz kommt. Wer lieber nichts ins Terminal tippt, kann die App auch
-selbst bauen (unten) — dann fragt niemand.
+aus dem Netz kommt. Danach startet Preen wie jedes andere Programm.
 
 ## Bedienen
 
@@ -74,18 +73,6 @@ Feineinstellungen **Bestehende Dateien ersetzen** ein.
 Preen hat keine Netzwerkfunktion, kein Konto, keine Anmeldung und keine
 Statistik. Die Bilder werden auf dem Rechner dekodiert, skaliert und kodiert
 und landen in dem Ordner, den man auswählt. Sonst passiert nichts.
-
-## Selbst bauen
-
-Gebraucht werden [Bun](https://bun.sh) und [Rust](https://rustup.rs).
-
-```
-bun install
-bun run tauri build
-```
-
-Die fertige App liegt danach in
-`src-tauri/target/release/bundle/macos/Preen.app`.
 
 ## Lizenz
 
