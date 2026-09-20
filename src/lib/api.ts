@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { load, type Store } from "@tauri-apps/plugin-store";
 
-export const SUPPORTED_EXTENSIONS = ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"];
+export const SUPPORTED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "tif", "tiff"];
 
 export interface ImageInfo {
   path: string;
@@ -32,6 +32,8 @@ export interface OutputFile {
   bytes: number;
   quality: number;
   limitMissed: boolean;
+  /** The size limit forced the picture below what the preset would give it. */
+  emergencyScaled: boolean;
 }
 
 export interface ImageResult {
@@ -45,9 +47,14 @@ export interface BatchResult {
   images: ImageResult[];
 }
 
-/** Maximum width in px and maximum file size in KB (1 KB = 1000 bytes; null = no limit). */
+/**
+ * Long edge in px, pixel cap in megapixels, the floor the emergency scaling
+ * stops at, and the file size in KB (1 KB = 1000 bytes; null = no limit).
+ */
 export interface Limits {
-  maxWidth: number;
+  longEdge: number;
+  maxMegapixels: number;
+  minLongEdge: number;
   maxKb: number | null;
 }
 
@@ -62,7 +69,8 @@ export const previewOutput = (args: {
   slug: string;
   firstImage: string;
   sizes: [number, number][];
-  maxWidth: number;
+  longEdge: number;
+  maxMegapixels: number;
   customOutputDir: string | null;
 }) => invoke<OutputPreview>("preview_output", args);
 
@@ -70,8 +78,7 @@ export const processImages = (args: {
   paths: string[];
   slug: string;
   customOutputDir: string | null;
-  maxWidth: number;
-  maxKb: number | null;
+  limits: Limits;
 }) => invoke<BatchResult>("process_images", args);
 
 export const onProgress = (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>

@@ -27,6 +27,9 @@ pub struct Bitmap {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+    /// True only when a pixel is actually not opaque. ImageIO hands back an
+    /// alpha channel for plain JPEGs and HEICs too, so the CGImage's own
+    /// answer is not usable: it would send every photo down the RGBA path.
     pub has_alpha: bool,
 }
 
@@ -80,7 +83,7 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
 
     let width = CGImage::width(Some(&image));
     let height = CGImage::height(Some(&image));
-    let has_alpha = !matches!(
+    let channel = !matches!(
         CGImage::alpha_info(Some(&image)),
         CGImageAlphaInfo::None | CGImageAlphaInfo::NoneSkipLast | CGImageAlphaInfo::NoneSkipFirst
     );
@@ -108,6 +111,11 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
     );
     CGContext::draw_image(Some(&context), rect, Some(&image));
     drop(context);
+
+    // One pass over the drawn pixels decides it: an alpha channel that is
+    // opaque everywhere is no alpha channel. Cheaper than the un-premultiply
+    // it saves, and it keeps opaque photos out of the RGBA encoder.
+    let has_alpha = channel && pixels.chunks_exact(4).any(|p| p[3] != 255);
 
     Ok(Bitmap {
         width: width as u32,

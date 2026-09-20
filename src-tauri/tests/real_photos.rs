@@ -1,11 +1,13 @@
 //! Manual check with real photos (ignored by default):
-//! PREEN_SAMPLES="a.heic:b.jpg" PREEN_WIDTH=1600 PREEN_KB=260 \
+//! PREEN_SAMPLES="a.heic:b.jpg" PREEN_EDGE=1600 PREEN_MP=1.8 PREEN_KB=260 \
+//!   PREEN_MIN=1000 \
 //!   cargo test --release --test real_photos -- --ignored --nocapture
 
 use std::path::PathBuf;
 use std::time::Instant;
 
 use preen_lib::pipeline::{self, Settings};
+use preen_lib::sizes::Limits;
 
 #[test]
 #[ignore]
@@ -15,13 +17,22 @@ fn real_photos() {
         .split(':')
         .map(PathBuf::from)
         .collect();
-    let max_width: u32 = std::env::var("PREEN_WIDTH").map_or(1600, |v| v.parse().unwrap());
+    let long_edge: u32 = std::env::var("PREEN_EDGE").map_or(1600, |v| v.parse().unwrap());
+    let max_mp: f64 = std::env::var("PREEN_MP").map_or(0.0, |v| v.parse().unwrap());
     let max_kb: Option<u64> = std::env::var("PREEN_KB").ok().map(|v| v.parse().unwrap());
     let settings = Settings {
-        max_width,
+        limits: if max_mp > 0.0 {
+            Limits {
+                long_edge,
+                max_pixels: (max_mp * 1_000_000.0) as u64,
+            }
+        } else {
+            Limits::long_edge_only(long_edge)
+        },
+        min_long_edge: std::env::var("PREEN_MIN").map_or(0, |v| v.parse().unwrap()),
         max_bytes: max_kb.map(|kb| kb * 1000),
     };
-    println!("max. {max_width} px, {max_kb:?} KB");
+    println!("max. {long_edge} px lange Kante, {max_mp} MP, {max_kb:?} KB");
 
     let out = tempfile::tempdir().unwrap();
     let start = Instant::now();

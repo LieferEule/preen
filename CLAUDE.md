@@ -8,6 +8,20 @@ design/panel-reference.html ist verbindlich: Farben, Maße, Radien,
 Abstände, Schriftgrößen, Zeiten und Kurven. Nicht aus Screenshots raten.
 Akzentflächen #2e6d63, Feder #50988d.
 
+## Bildgrößen
+Ein Preset ist lange Kante, Pixeldeckel und Größengrenze. Die lange
+Kante allein reicht nicht: bei 2400 landet ein Hochformat auf
+2400x3200, also 7,7 MP gegen 3,2 MP eines 16:9-Heros, und keine
+Qualitätsstufe holt diese Datei zurück unter die Grenze.
+Reicht der Qualitätsboden nicht, nimmt die Notfallskalierung dreimal
+10 % von der langen Kante, aber nie unter die Untergrenze: ein
+1182-px-"Hero" wäre kleiner als ein Inhaltsbild. Danach ehrlich zu
+groß ausgeben und limitMissed setzen, nicht still zu klein.
+0,39 B/px bei Q60 sind für dichte Naturmotive korrekt, gegen
+cwebp -q 60 auf identischen Pixeln geprüft (acht Bilder, byte-gleich).
+Wer diese Zahl sieht, sucht keinen Fehler im Encoder, sondern
+verkleinert.
+
 ## Panelgeometrie
 Feste Höhe je Zustand, an einer Stelle definiert. Keine dynamische
 Höhenmessung, kein ResizeObserver.
@@ -54,7 +68,8 @@ Was ohne GUI prüfbar ist, über preen-cli prüfen; es ruft dieselbe
 Funktion wie der Tauri-Befehl auf (pipeline::convert):
   cargo run --features cli --bin preen-cli -- \
     --preset hero --name testbild --out /tmp/preen-test bild1.jpg
-Presets: inhaltsbild (1600 px, 260 KB), hero (2400 px, 500 KB);
+Presets: inhaltsbild (lange Kante 1600, 1,8 MP, 260 KB, Notfall-
+Untergrenze 1000), hero (2400, 3,5 MP, 500 KB, Untergrenze 1600).
 --json gibt dasselbe maschinenlesbar aus, Exitcode 1 sobald eine
 Datei fehlschlägt.
 --features cli muss sein: ohne das Feature baut cargo das zweite

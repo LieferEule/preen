@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use preen_lib::imageio;
 use preen_lib::pipeline::{self, BatchResult, OutputFile, Settings, QUALITY_FLOOR, QUALITY_START};
+use preen_lib::sizes::Limits;
 use sha2::{Digest, Sha256};
 
 const FIXTURES: [&str; 8] = [
@@ -20,7 +21,11 @@ const FIXTURES: [&str; 8] = [
 ];
 
 const CONTENT: Settings = Settings {
-    max_width: 1600,
+    limits: Limits {
+        long_edge: 1600,
+        max_pixels: 1_800_000,
+    },
+    min_long_edge: 1000,
     max_bytes: Some(260_000),
 };
 
@@ -119,7 +124,8 @@ fn one_image_in_one_lossy_webp_out() {
             .collect::<Vec<_>>()
     );
 
-    // Scaled down to 1600 wide keeping the aspect ratio; narrower ones untouched.
+    // Scaled down to a long edge of 1600 keeping the aspect ratio, then under
+    // the 1,8-MP cap; smaller ones untouched.
     let dims: Vec<(u32, u32)> = files.iter().map(|o| (o.width, o.height)).collect();
     assert_eq!(
         dims,
@@ -129,7 +135,7 @@ fn one_image_in_one_lossy_webp_out() {
             (300, 200),   // not upscaled
             (900, 600),   // not upscaled
             (800, 1200),  // EXIF-rotated portrait, not upscaled
-            (1600, 1200), // HEIC 4:3
+            (1549, 1162), // HEIC 4:3: 1600x1200 waeren 1,92 MP, der Deckel zieht nach
             (1600, 1067), // TIFF 3:2
             (1600, 900),  // 5000x2813
         ]
@@ -183,7 +189,8 @@ fn max_width_is_respected_and_never_upscales() {
     let all = fixture_copies(tmp.path());
     let paths = vec![all[7].clone(), all[0].clone(), all[1].clone()]; // 5000, 2000, 1000
     let hero = Settings {
-        max_width: 3200,
+        limits: Limits::long_edge_only(3200),
+        min_long_edge: 0,
         max_bytes: Some(500_000),
     };
     let dims: Vec<(u32, u32)> = outputs(&run(&paths, "hero", &hero))
@@ -193,7 +200,8 @@ fn max_width_is_respected_and_never_upscales() {
     assert_eq!(dims, [(3200, 1800), (2000, 1125), (1000, 750)]);
 
     let thumb = Settings {
-        max_width: 800,
+        limits: Limits::long_edge_only(800),
+        min_long_edge: 0,
         max_bytes: Some(100_000),
     };
     let dims: Vec<(u32, u32)> = outputs(&run(&paths, "thumb", &thumb))
@@ -385,4 +393,115 @@ fn size_limit_lowers_quality_by_bisection_down_to_60() {
     let tight = encode(Some(s60));
     assert!(!tight.limit_missed);
     assert!(tight.data.len() as u64 <= s60);
+}
+
+/// A detailed WebP on disk — both a source the decoder has to handle and the
+/// only fixture that does not compress away to nothing.
+fn detailed_webp(dir: &Path, name: &str, w: u32, h: u32) -> PathBuf {
+    let rgb: Vec<u8> = detailed_pixels(w, h)
+        .chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
+    let data = webp::Encoder::from_rgb(&rgb, w, h).encode(100.0);
+    let path = dir.join(name);
+    fs::write(&path, &*data).unwrap();
+    path
+}
+
+#[test]
+fn webp_is_accepted_as_a_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "vorlage.webp", 2000, 1000);
+    assert!(pipeline::is_supported(&source));
+
+    let settings = Settings {
+        limits: Limits::long_edge_only(800),
+        min_long_edge: 0,
+        max_bytes: None,
+    };
+    let result = run(&[source], "aus-webp", &settings);
+    let files = outputs(&result);
+    assert_eq!(files.len(), 1, "{:?}", result.images[0].error);
+    assert_eq!((files[0].width, files[0].height), (800, 400));
+    assert_eq!(files[0].quality, QUALITY_START);
+    assert!(!files[0].emergency_scaled);
+}
+
+#[test]
+fn emergency_scaling_shrinks_when_the_quality_floor_is_not_enough() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "dicht.webp", 1200, 800);
+    let at = |limit: Option<u64>, slug: &str| {
+        let settings = Settings {
+            limits: Limits::long_edge_only(1200),
+            min_long_edge: 0,
+            max_bytes: limit,
+        };
+        let result = run(std::slice::from_ref(&source), slug, &settings);
+        outputs(&result)[0].clone()
+    };
+
+    // Reference: no limit, full size.
+    let free = at(None, "frei");
+    assert_eq!((free.width, free.height), (1200, 800));
+
+    // Just under what quality 60 manages at full size — so the floor is
+    // reached, and only fewer pixels can still get under the limit.
+    let floor_full =
+        pipeline::encode_within_limit(detailed_pixels(1200, 800), 1200, 800, false, Some(1))
+            .unwrap();
+    let limit = floor_full.data.len() as u64 * 9 / 10;
+
+    let tight = at(Some(limit), "eng");
+    assert!(!tight.limit_missed, "{tight:?}");
+    assert!(tight.bytes <= limit, "{tight:?}");
+    assert!(tight.width < 1200 && tight.height < 800, "{tight:?}");
+    assert!(tight.emergency_scaled);
+    assert_eq!(tight.width * 800, tight.height * 1200, "Seitenverhältnis");
+    assert!(tight.quality >= QUALITY_FLOOR);
+
+    // Hopeless: exactly three steps of 10 %, then written as it is and flagged.
+    let hopeless = at(Some(1), "aussichtslos");
+    assert_eq!((hopeless.width, hopeless.height), (875, 583));
+    assert_eq!(hopeless.quality, QUALITY_FLOOR);
+    assert!(hopeless.limit_missed);
+}
+
+#[test]
+fn emergency_scaling_stops_at_the_next_preset_down() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "dicht.webp", 1200, 800);
+    let settings = Settings {
+        limits: Limits::long_edge_only(1200),
+        // Wie hero: nie unter die lange Kante des Inhaltsbildes.
+        min_long_edge: 1000,
+        max_bytes: Some(1),
+    };
+    let out = outputs(&run(std::slice::from_ref(&source), "boden", &settings))[0].clone();
+
+    // Ohne Untergrenze wären es drei Schritte auf 875 px. Der erste Schritt
+    // auf 1080 ist erlaubt, der zweite würde unter 1000 fallen und wird auf
+    // 1000 gekappt; danach ist Schluss.
+    assert_eq!((out.width, out.height), (1000, 667), "{out:?}");
+    assert!(out.limit_missed);
+    assert!(out.emergency_scaled);
+    assert_eq!(out.quality, QUALITY_FLOOR);
+}
+
+#[test]
+fn a_source_already_below_the_floor_is_not_shrunk_further() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = detailed_webp(tmp.path(), "klein.webp", 900, 600);
+    let settings = Settings {
+        limits: Limits::long_edge_only(1200),
+        min_long_edge: 1000,
+        max_bytes: Some(1),
+    };
+    let out = outputs(&run(std::slice::from_ref(&source), "klein", &settings))[0].clone();
+    assert_eq!((out.width, out.height), (900, 600), "{out:?}");
+    assert!(out.limit_missed);
+    assert!(
+        !out.emergency_scaled,
+        "unter der Untergrenze wird nicht skaliert"
+    );
 }

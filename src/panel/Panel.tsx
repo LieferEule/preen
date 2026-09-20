@@ -31,7 +31,15 @@ import {
   type ImageInfo,
   type Target,
 } from "../lib/api";
-import { PRESETS, SIZE_RANGE, WIDTH_RANGE, kb, presetByName, type Preset } from "../lib/presets";
+import {
+  EDGE_RANGE,
+  PRESETS,
+  SIZE_RANGE,
+  kb,
+  mp,
+  presetByName,
+  type Preset,
+} from "../lib/presets";
 import { Popover } from "../components/Popover";
 import { Counting, Swap, reducedMotion, useRamp } from "./widgets";
 
@@ -78,9 +86,11 @@ type Phase =
   | { kind: "done"; result: BatchResult; maxKb: number | null; sourceBytes: number }
   | { kind: "failed"; message: string };
 
-/** Width and size limit for this run: the preset, with per-run overrides. */
+/** Size limits for this run: the preset, with per-run overrides. */
 interface Limits {
-  maxWidth: number;
+  longEdge: number;
+  maxMegapixels: number;
+  minLongEdge: number;
   maxKb: number;
   overridden: boolean;
 }
@@ -91,7 +101,7 @@ export default function Panel() {
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
-  const [width, setWidth] = useState(PRESETS[0].maxWidth);
+  const [longEdge, setLongEdge] = useState(PRESETS[0].longEdge);
   const [maxKb, setMaxKb] = useState(PRESETS[0].maxKb);
   const [target, setTarget] = useState<Target>(TARGET_SOURCE);
   const [recent, setRecent] = useState<string[]>([]);
@@ -115,9 +125,13 @@ export default function Panel() {
   busyRef.current = busy;
 
   const limits: Limits = {
-    maxWidth: width,
+    longEdge,
+    // Pixel cap and emergency floor belong to the preset; the fine controls
+    // do not touch them.
+    maxMegapixels: preset.maxMegapixels,
+    minLongEdge: preset.minLongEdge,
     maxKb,
-    overridden: width !== preset.maxWidth || maxKb !== preset.maxKb,
+    overridden: longEdge !== preset.longEdge || maxKb !== preset.maxKb,
   };
   const loaded = images.length > 0;
 
@@ -127,7 +141,7 @@ export default function Panel() {
       const [stored, presetName] = await Promise.all([appSettings(), loadPreset()]);
       const p = presetByName(presetName);
       setPreset(p);
-      setWidth(p.maxWidth);
+      setLongEdge(p.longEdge);
       setMaxKb(p.maxKb);
       setRecent(stored.recentTargets);
       setAutoHideSeconds(stored.autoHideSeconds);
@@ -279,7 +293,8 @@ export default function Panel() {
         slug,
         firstImage: images[0].path,
         sizes: images.map((i) => [i.width, i.height] as [number, number]),
-        maxWidth: limits.maxWidth,
+        longEdge: limits.longEdge,
+        maxMegapixels: limits.maxMegapixels,
         customOutputDir: custom,
       });
       if (!stale) setOutputDir(result.outputDir);
@@ -287,7 +302,7 @@ export default function Panel() {
     return () => {
       stale = true;
     };
-  }, [images, slug, limits.maxWidth, resolveTarget, loaded]);
+  }, [images, slug, limits.longEdge, limits.maxMegapixels, resolveTarget, loaded]);
 
   const chooseFolder = async () => {
     const dir = await open({ directory: true });
@@ -301,7 +316,7 @@ export default function Panel() {
 
   const pickPreset = (p: Preset) => {
     setPreset(p);
-    setWidth(p.maxWidth);
+    setLongEdge(p.longEdge);
     setMaxKb(p.maxKb);
     savePreset(p.name);
   };
@@ -317,8 +332,12 @@ export default function Panel() {
         paths: images.map((i) => i.path),
         slug,
         customOutputDir: custom,
-        maxWidth: limits.maxWidth,
-        maxKb: limits.maxKb,
+        limits: {
+          longEdge: limits.longEdge,
+          maxMegapixels: limits.maxMegapixels,
+          minLongEdge: limits.minLongEdge,
+          maxKb: limits.maxKb,
+        },
       });
       const sourceBytes = images.reduce((sum, i) => sum + (i.bytes ?? 0), 0);
       setPhase({ kind: "done", result, maxKb: limits.maxKb, sourceBytes });
@@ -332,7 +351,7 @@ export default function Panel() {
     setPreview(null);
     setSlugTouched(false);
     setSlug("");
-    setWidth(preset.maxWidth);
+    setLongEdge(preset.longEdge);
     setMaxKb(preset.maxKb);
     setPopover(null);
     grewOnce.current = false;
@@ -539,9 +558,9 @@ export default function Panel() {
                     {phase.message}
                   </p>
                 ) : (
-                <p className="pl-1 text-[11px] text-[var(--color-ink-2)] tabular-nums">
+                <p className="truncate pl-1 text-[11px] text-[var(--color-ink-2)] tabular-nums">
                   <Swap
-                    text={`${limits.maxWidth} px breit · höchstens ${limits.maxKb} KB${
+                    text={`lange Kante ${limits.longEdge} px · ${mp(limits.maxMegapixels)} · höchstens ${limits.maxKb} KB${
                       images.length > 1 ? " je Bild" : ""
                     }${limits.overridden ? " (angepasst)" : ""}`}
                     className="inline-block"
@@ -656,11 +675,11 @@ export default function Panel() {
                 <Popover open={popover === "fine"} width={232} align="right" label="Feineinstellung">
                   <div className="space-y-3 p-3">
                     <Slider
-                      label="Breite"
+                      label="Lange Kante"
                       unit="px"
-                      {...WIDTH_RANGE}
-                      value={limits.maxWidth}
-                      onChange={setWidth}
+                      {...EDGE_RANGE}
+                      value={limits.longEdge}
+                      onChange={setLongEdge}
                     />
                     <Slider
                       label="Obergrenze"
@@ -672,7 +691,7 @@ export default function Panel() {
                     <div className="hairline" />
                     <button
                       onClick={() => {
-                        setWidth(preset.maxWidth);
+                        setLongEdge(preset.longEdge);
                         setMaxKb(preset.maxKb);
                       }}
                       className="pressable w-full text-left text-[12px] font-semibold text-[var(--color-accent)]"
@@ -897,6 +916,24 @@ function Done(props: {
   const used = limitBytes ? Math.min(100, (bytes / limitBytes) * 100) : 100;
   const first = files[0];
   const many = files.length > 1;
+  // Files that stayed over the limit even after quality and size gave way.
+  // Silence would be the wrong answer here: the whole promise of the preset
+  // is the number, so when it is missed the panel says so instead of the
+  // usual "% der Obergrenze".
+  const missed = files.filter((f) => f.limitMissed);
+  // Smaller than the preset's own rules would give — the size limit had to
+  // take pixels away. Worth saying even when the limit was then met: the
+  // picture is quietly below what the preset promises. A source that was
+  // small to begin with does not count; that one is never scaled.
+  const shrunk = files.filter((f) => f.emergencyScaled);
+  const shrunkTo = shrunk.length
+    ? Math.min(...shrunk.map((f) => Math.max(f.width, f.height)))
+    : null;
+  const worst = missed.reduce(
+    (max, f) => (max && max.bytes >= f.bytes ? max : f),
+    undefined as (typeof files)[number] | undefined,
+  );
+  const overColor = "#8c2f26";
   // The bar starts first, the number follows it in; the percentage belongs to
   // the number, not the bar.
   const barRamp = useRamp(1500, 340);
@@ -927,7 +964,10 @@ function Done(props: {
         style={{ boxShadow: "inset 0 0 0 1px rgba(15,44,43,0.1)" }}
       >
         <div className="flex items-baseline gap-2">
-          <span className="text-[27px] leading-none font-semibold tracking-[-0.02em] tabular-nums">
+          <span
+            className="text-[27px] leading-none font-semibold tracking-[-0.02em] tabular-nums"
+            style={worst ? { color: overColor } : undefined}
+          >
             <Counting value={(bytes / 1000) * numberRamp} digits={bytes < 10000 ? 1 : 0} /> KB
           </span>
           <span className="text-[12px] text-[var(--color-ink-2)]">
@@ -940,15 +980,59 @@ function Done(props: {
         >
           <div
             className="h-full rounded-full bg-[var(--color-accent)]"
-            style={{ width: `${used * barRamp}%` }}
+            style={{
+              width: `${used * barRamp}%`,
+              ...(worst ? { background: overColor } : null),
+            }}
           />
         </div>
-        <div className="flex justify-between text-[10px] font-medium tracking-[0.02em] text-[var(--color-ink-2)]">
-          <span className="tabular-nums">
-            <Counting value={used * numberRamp} digits={0} /> % der Obergrenze
-          </span>
-          <span>{maxKb ? `Grenze ${maxKb} KB` : "ohne Grenze"}</span>
-        </div>
+        {/* One line, always: over the limit it carries the name, the size it
+            really is and the quality it got to — same height, no scrolling. */}
+        {worst ? (
+          <div
+            className="flex items-baseline justify-between gap-2 text-[10px] font-semibold tracking-[0.02em]"
+            style={{ color: overColor }}
+            title={`${worst.fileName} · ${kb(worst.bytes)} · Qualität ${worst.quality}${
+              worst.emergencyScaled
+                ? ` · auf ${worst.width} × ${worst.height} px verkleinert, um unter ${maxKb} KB zu kommen`
+                : ""
+            }`}
+          >
+            <span className="truncate">
+              {missed.length > 1
+                ? `${missed.length} von ${files.length} über ${maxKb} KB`
+                : `Über ${maxKb} KB`}
+              {worst.emergencyScaled &&
+                ` · verkleinert auf ${Math.max(worst.width, worst.height)} px`}
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {kb(worst.bytes)} · Q{worst.quality}
+            </span>
+          </div>
+        ) : (
+          <div
+            className="flex justify-between gap-2 text-[10px] font-medium tracking-[0.02em] text-[var(--color-ink-2)]"
+            title={
+              shrunkTo
+                ? `Auf ${shrunkTo} px lange Kante verkleinert, um unter ${maxKb} KB zu bleiben`
+                : undefined
+            }
+          >
+            <span className="shrink-0 tabular-nums">
+              <Counting value={used * numberRamp} digits={0} /> % der Obergrenze
+            </span>
+            {/* Normally the limit; when pixels had to give way, that instead —
+                same line, same height, no warning colour, because nothing
+                went wrong. */}
+            <span className="truncate tabular-nums">
+              {shrunkTo
+                ? `verkleinert auf ${shrunkTo} px`
+                : maxKb
+                  ? `Grenze ${maxKb} KB`
+                  : "ohne Grenze"}
+            </span>
+          </div>
+        )}
       </div>
 
       {failed.length > 0 && (

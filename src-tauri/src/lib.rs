@@ -7,7 +7,7 @@ pub mod pipeline;
 pub mod preset;
 mod settings;
 mod shortcut;
-mod sizes;
+pub mod sizes;
 mod tray;
 mod windows;
 
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{ActivationPolicy, AppHandle, Emitter, Manager as _, WindowEvent};
 
@@ -87,7 +87,7 @@ async fn inspect_images(paths: Vec<String>) -> InspectResult {
             let checked = if !p.is_file() {
                 Err("Keine Datei".to_string())
             } else if !pipeline::is_supported(p) {
-                Err("Format nicht unterstützt (nur JPG, PNG, HEIC, TIFF)".to_string())
+                Err("Format nicht unterstützt (nur JPG, PNG, WebP, HEIC, TIFF)".to_string())
             } else {
                 imageio::dimensions(p)
             };
@@ -133,9 +133,11 @@ fn preview_output(
     slug: String,
     first_image: String,
     sizes: Vec<(u32, u32)>,
-    max_width: u32,
+    long_edge: u32,
+    max_megapixels: f64,
     custom_output_dir: Option<String>,
 ) -> NamePreview {
+    let limits = output_limits(long_edge, max_megapixels);
     let output_dir = pipeline::resolve_output_dir(
         Path::new(&first_image),
         custom_output_dir.as_deref().map(Path::new),
@@ -148,7 +150,7 @@ fn preview_output(
             .into_iter()
             .zip(sizes)
             .map(|(file_name, (w, h))| {
-                let (width, height) = sizes::output_size(w, h, max_width);
+                let (width, height) = sizes::output_size(w, h, limits);
                 PlannedImage {
                     file_name,
                     width,
@@ -160,22 +162,51 @@ fn preview_output(
     }
 }
 
-/// `max_kb` uses 1 KB = 1000 bytes, like Finder; `None` means no limit.
+/// Everything a run is allowed to produce, as the panel sends it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunLimits {
+    long_edge: u32,
+    max_megapixels: f64,
+    min_long_edge: u32,
+    /// 1 KB = 1000 bytes, like Finder; `None` means no limit.
+    max_kb: Option<u64>,
+}
+
+impl From<RunLimits> for pipeline::Settings {
+    fn from(l: RunLimits) -> Self {
+        pipeline::Settings {
+            limits: output_limits(l.long_edge, l.max_megapixels),
+            min_long_edge: l.min_long_edge,
+            max_bytes: l.max_kb.map(|kb| kb * 1000),
+        }
+    }
+}
+
+/// The frontend sends megapixels because that is what its sliders show;
+/// a value of 0 or less means "no pixel cap".
+fn output_limits(long_edge: u32, max_megapixels: f64) -> sizes::Limits {
+    if max_megapixels > 0.0 {
+        sizes::Limits {
+            long_edge,
+            max_pixels: (max_megapixels * 1_000_000.0) as u64,
+        }
+    } else {
+        sizes::Limits::long_edge_only(long_edge)
+    }
+}
+
 #[tauri::command]
 async fn process_images(
     app: AppHandle,
     paths: Vec<String>,
     slug: String,
     custom_output_dir: Option<String>,
-    max_width: u32,
-    max_kb: Option<u64>,
+    limits: RunLimits,
 ) -> Result<BatchResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let images: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-        let settings = pipeline::Settings {
-            max_width,
-            max_bytes: max_kb.map(|kb| kb * 1000),
-        };
+        let settings = pipeline::Settings::from(limits);
         pipeline::convert(
             &images,
             &slug,

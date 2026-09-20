@@ -17,8 +17,8 @@ preen-cli — Bilder web-fertig als WebP, ohne GUI
 
   preen-cli [Optionen] <bild> [<bild> ...]
 
-  --preset <name>   inhaltsbild (1600 px, 260 KB) oder hero (2400 px, 500 KB).
-                    Vorgabe: inhaltsbild
+  --preset <name>   inhaltsbild (lange Kante 1600, 1,8 MP, 260 KB) oder
+                    hero (2400, 3,5 MP, 500 KB). Vorgabe: inhaltsbild
   --name <text>     Zielname; wird zum Slug für Dateinamen und Unterordner
   --out <ordner>    Zielordner. Vorgabe: der Ordner des ersten Bildes
   --json            Ergebnis als JSON auf stdout, sonst nichts
@@ -175,8 +175,10 @@ fn print_lines(result: &BatchResult) {
 fn print_json(args: &Args, result: &BatchResult, failed: usize) {
     let value = serde_json::json!({
         "preset": args.preset.name,
-        "maxWidth": args.preset.max_width,
+        "longEdge": args.preset.long_edge,
+        "maxMegapixels": args.preset.max_megapixels,
         "maxKb": args.preset.max_kb,
+        "minLongEdge": args.preset.min_long_edge,
         "name": args.name,
         "outputDir": result.output_dir,
         "failed": failed,

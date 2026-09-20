@@ -12,24 +12,45 @@ use serde::Serialize;
 
 use crate::imageio::{self, Bitmap};
 use crate::naming::{plan_base_names, slugify};
-use crate::sizes::output_size;
+use crate::sizes::{output_size, Limits};
 
 /// Lossy WebP quality tried first, and used whenever the file fits.
 pub const QUALITY_START: u8 = 80;
 /// Quality never goes below this, even if the size limit is missed —
 /// a slightly too large file beats a mushy one.
+///
+/// Before anyone lowers this because some photo came out far too large:
+/// dense nature motifs really do cost that much. A wet, mossy forest wall
+/// measures 0,39 bytes per pixel at quality 60 — roughly twenty times a
+/// calm motif. That was checked against `cwebp -q 60` on the identical
+/// pixels, for eight images: byte for byte the same numbers, so it is
+/// libwebp's honest answer and not a bug in our encoder call, our decoder
+/// or our resampling. The way out of such a file is fewer pixels
+/// (`EMERGENCY_SCALE`), not less quality.
 pub const QUALITY_FLOOR: u8 = 60;
 /// File extensions accepted as input (compared case-insensitively).
-pub const SUPPORTED_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff"];
+pub const SUPPORTED_EXTENSIONS: [&str; 8] =
+    ["jpg", "jpeg", "png", "webp", "heic", "heif", "tif", "tiff"];
 /// Images decoded at the same time. A 48 MP photo takes ~200 MB as RGBA,
 /// so this is kept small on purpose.
 const MAX_PARALLEL_IMAGES: usize = 3;
 
+/// Last resort when even [`QUALITY_FLOOR`] misses the size limit: shrink the
+/// long edge by this much and bisect again.
+const EMERGENCY_SCALE: f64 = 0.9;
+/// How often that may happen before the file is written as it is.
+const EMERGENCY_STEPS: u8 = 3;
+
 /// What one run should produce.
 #[derive(Debug, Clone)]
 pub struct Settings {
-    /// Wider originals are scaled down to this width; narrower ones are kept.
-    pub max_width: u32,
+    /// Output dimensions: long edge and pixel cap.
+    pub limits: Limits,
+    /// Floor for the emergency scaling — the long edge of the next preset
+    /// down. Below it the picture is no longer the thing that was asked for
+    /// (an 1182 px "hero" is smaller than an inhaltsbild), so the run stops
+    /// shrinking and reports an oversized file instead. 0 turns the floor off.
+    pub min_long_edge: u32,
     /// Upper file size in bytes; `None` means no limit (always quality 80).
     pub max_bytes: Option<u64>,
 }
@@ -45,6 +66,9 @@ pub struct OutputFile {
     pub quality: u8,
     /// The size limit could not be met even at [`QUALITY_FLOOR`].
     pub limit_missed: bool,
+    /// The size limit forced the picture below the dimensions the preset
+    /// would have given it — it is smaller than the preset promises.
+    pub emergency_scaled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -168,15 +192,35 @@ fn process_image(source: &Path, path: &Path, settings: &Settings) -> Result<Outp
         return Err("Dateiformat wird nicht unterstützt".to_string());
     }
     let original = imageio::decode(source)?;
-    let (width, height) = output_size(original.width, original.height, settings.max_width);
-    let pixels = resize(&original, width, height)?;
-    let encoded = encode_within_limit(
-        pixels,
-        width,
-        height,
-        original.has_alpha,
-        settings.max_bytes,
-    )?;
+    let (mut width, mut height) = output_size(original.width, original.height, settings.limits);
+
+    // Quality alone cannot always reach the limit. When the floor is hit and
+    // the file is still too large, take 10 % off the long edge and bisect
+    // again — fewer pixels at quality 60-80 beat a huge file at 60. Always
+    // resampled from the original, never from an already shrunken copy, and
+    // never past `min_long_edge`: rather an honestly oversized file than a
+    // quietly undersized one.
+    let mut step = 0;
+    let encoded = loop {
+        let pixels = resize(&original, width, height)?;
+        let encoded = encode_within_limit(
+            pixels,
+            width,
+            height,
+            original.has_alpha,
+            settings.max_bytes,
+        )?;
+        let long_edge = width.max(height);
+        if !encoded.limit_missed || step == EMERGENCY_STEPS || long_edge <= settings.min_long_edge {
+            break encoded;
+        }
+        step += 1;
+        let shorter = ((long_edge as f64 * EMERGENCY_SCALE).round() as u32)
+            .max(settings.min_long_edge)
+            .max(1);
+        (width, height) = output_size(width, height, Limits::long_edge_only(shorter));
+    };
+
     let bytes = write_new_file(path, &encoded.data)?;
     Ok(OutputFile {
         path: path.to_string_lossy().into_owned(),
@@ -189,6 +233,7 @@ fn process_image(source: &Path, path: &Path, settings: &Settings) -> Result<Outp
         bytes,
         quality: encoded.quality,
         limit_missed: encoded.limit_missed,
+        emergency_scaled: step > 0,
     })
 }
 
