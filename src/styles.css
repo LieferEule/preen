@@ -8,6 +8,9 @@
   /* Accent surfaces need 4.5:1 against white, which #50988d misses. */
   --color-accent: #2e6d63;
   --color-feather: #50988d;
+  /* Über der Größengrenze. Kein Fehler — die Datei ist brauchbar, nur
+     größer als zugesagt; deshalb dieselbe Sättigung wie der Akzent. */
+  --color-over: #8c2f26;
   /* Quiet surfaces and hairlines, tinted with the ink */
   --color-quiet: rgba(15, 44, 43, 0.06);
   --color-quieter: rgba(15, 44, 43, 0.07);

@@ -4,7 +4,13 @@ import { desktopDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import PreenMark from "../components/icons/PreenMark";
-import { ChevronIcon, CheckIcon, FolderIcon, SlidersIcon } from "../components/icons/Glyphs";
+import {
+  BangIcon,
+  ChevronIcon,
+  CheckIcon,
+  FolderIcon,
+  SlidersIcon,
+} from "../components/icons/Glyphs";
 import {
   TARGET_DESKTOP,
   TARGET_SOURCE,
@@ -554,7 +560,7 @@ export default function Panel() {
                   </div>
                 </div>
                 {phase.kind === "failed" ? (
-                  <p className="truncate pl-1 text-[11px] text-[#8c2f26]" title={phase.message}>
+                  <p className="truncate pl-1 text-[11px] text-[var(--color-over)]" title={phase.message}>
                     {phase.message}
                   </p>
                 ) : (
@@ -781,7 +787,16 @@ function Header(props: {
   );
 }
 
-function Thumb({ src, badge }: { src: string | null; badge?: boolean }) {
+function Thumb({
+  src,
+  badge,
+  over,
+}: {
+  src: string | null;
+  badge?: boolean;
+  /** Over the size limit: the badge keeps its shape and says so. */
+  over?: boolean;
+}) {
   return (
     <div className="relative shrink-0">
       <div className="size-[60px] overflow-hidden rounded-[18px] bg-white/60 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)]">
@@ -789,10 +804,17 @@ function Thumb({ src, badge }: { src: string | null; badge?: boolean }) {
       </div>
       {badge && (
         <span
-          className="check-in absolute -right-1 -bottom-1 grid size-6 place-items-center rounded-full bg-[var(--color-accent)] text-white"
-          style={{ boxShadow: "0 0 0 3px rgba(255,255,255,0.85)" }}
+          className="check-in absolute -right-1 -bottom-1 grid size-6 place-items-center rounded-full text-white"
+          style={{
+            boxShadow: "0 0 0 3px rgba(255,255,255,0.85)",
+            background: over ? "var(--color-over)" : "var(--color-accent)",
+          }}
         >
-          <CheckIcon size={12} strokeWidth={2.4} />
+          {over ? (
+            <BangIcon size={12} strokeWidth={2.4} />
+          ) : (
+            <CheckIcon size={12} strokeWidth={2.4} />
+          )}
         </span>
       )}
     </div>
@@ -933,7 +955,7 @@ function Done(props: {
     (max, f) => (max && max.bytes >= f.bytes ? max : f),
     undefined as (typeof files)[number] | undefined,
   );
-  const overColor = "#8c2f26";
+  const overColor = "var(--color-over)";
   // The bar starts first, the number follows it in; the percentage belongs to
   // the number, not the bar.
   const barRamp = useRamp(1500, 340);
@@ -948,7 +970,7 @@ function Done(props: {
   return (
     <>
       <div className="flex items-center gap-3">
-        <Thumb src={props.preview} badge />
+        <Thumb src={props.preview} badge over={!!worst} />
         <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
           <p className="truncate text-[13px] font-semibold">
             {many ? `${files.length} Dateien` : first?.fileName}
@@ -1036,7 +1058,7 @@ function Done(props: {
       </div>
 
       {failed.length > 0 && (
-        <p className="text-[11px] text-[#8c2f26]">
+        <p className="text-[11px] text-[var(--color-over)]">
           {failed.length === 1 ? "1 Bild" : `${failed.length} Bilder`} konnten nicht verarbeitet werden.
         </p>
       )}

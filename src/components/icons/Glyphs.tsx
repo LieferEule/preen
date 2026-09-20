@@ -42,3 +42,13 @@ export const CheckIcon = ({ className, size = 12, strokeWidth = 2.4 }: Props) =>
     <path d="M3 8.5 L6.5 12 L13 4.5" />
   </svg>
 );
+
+/** Stands in for the check when the size limit was missed. Same grid, same
+ *  stroke — the file is usable, it is only bigger than promised, so no
+ *  triangle and no cross. The dot is a zero-length path under a round cap. */
+export const BangIcon = ({ className, size = 12, strokeWidth = 2.4 }: Props) => (
+  <svg {...base(size, strokeWidth)} className={className}>
+    <path d="M8 3.4 L8 9.2" />
+    <path d="M8 12.6 L8 12.6" />
+  </svg>
+);

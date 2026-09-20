@@ -22,6 +22,7 @@
     Text tertiär     #7d9995
     Akzentflächen    #2e6d63
     Feder            #50988d
+    über der Grenze  #8c2f26
     stille Fläche    rgba(15,44,43,0.06)
     Wannen-Grund     rgba(15,44,43,0.07)
     Trennlinie       rgba(15,44,43,0.12)
@@ -231,6 +232,58 @@
       <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 500; letter-spacing: 0.02em; color: #4a6b69;">
         <span style="font-variant-numeric: tabular-nums;">66 % der Obergrenze</span>
         <span>Grenze 260 KB</span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: rgba(255,255,255,0.8); color: #0f2c2b; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(15,44,43,0.12);">Im Finder zeigen</button>
+      <button type="button" style="flex-grow: 1; height: 44px; border: 0; border-radius: 15px; background: #2e6d63; color: #ffffff; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(6,22,26,0.22);">Noch eins</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 3b · FERTIG, ÜBER DER GRENZE ============ -->
+<!--
+  Gleiche Geometrie wie 3, gleiche Höhe (258). Nur die Glyphe im Abzeichen,
+  die Farbe von Zahl, Balken und Wertzeile wechseln, und die Wertzeile trägt
+  statt "% der Obergrenze / Grenze" die Meldung. Die Datei ist brauchbar,
+  nur größer als zugesagt — deshalb Ausrufezeichen, kein Warndreieck und
+  kein Kreuz, und der Balken bleibt ein Balken.
+  "verkleinert auf X px" steht immer da, wenn die Notfallskalierung Pixel
+  genommen hat — im Erfolgsfall in #4a6b69 rechts in der Wertzeile.
+-->
+<section>
+  <div class="caption">3b · Fertig, über der Grenze</div>
+  <div class="glass" style="width: 340px; box-sizing: border-box; padding: 16px; display: flex; flex-direction: column; gap: 14px; border-radius: 34px;">
+
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="position: relative; width: 60px; height: 60px; flex-shrink: 0;">
+        <div style="width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(145deg, #3d4a3a 0%, #2b3328 45%, #171d16 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5);"></div>
+        <div style="position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 9999px; background: #8c2f26; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgba(255,255,255,0.85);">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3.4 L8 9.2"></path>
+            <path d="M8 12.6 L8 12.6"></path>
+          </svg>
+        </div>
+      </div>
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+        <div style="font-size: 13px; font-weight: 600; color: #0f2c2b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">strandhotel-abendlicht.webp</div>
+        <div style="font-size: 11px; font-weight: 400; color: #4a6b69;">848 × 1130 px · Qualität 60</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px; padding: 13px 14px; border-radius: 20px; background: rgba(255,255,255,0.62); box-shadow: inset 0 0 0 1px rgba(15,44,43,0.1);">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <div style="font-size: 27px; font-weight: 600; letter-spacing: -0.02em; color: #8c2f26; font-variant-numeric: tabular-nums;">373 KB</div>
+        <div style="font-size: 12px; font-weight: 400; color: #4a6b69;">aus 7,9 MB</div>
+      </div>
+      <div style="position: relative; height: 7px; border-radius: 9999px; background: rgba(15,44,43,0.12); overflow: hidden;">
+        <div style="position: absolute; top: 0; bottom: 0; left: 0; width: 100%; border-radius: 9999px; background: #8c2f26;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: #8c2f26;">
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Über 260 KB · verkleinert auf 1130 px</span>
+        <span style="flex-shrink: 0; font-variant-numeric: tabular-nums;">373 KB · Q60</span>
       </div>
     </div>
 

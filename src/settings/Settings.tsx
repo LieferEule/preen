@@ -202,7 +202,7 @@ export default function Settings() {
           </div>
         </Row>
         {error && (
-          <p className="-mt-1 pb-2 text-right text-[11px] text-[#8c2f26]">
+          <p className="-mt-1 pb-2 text-right text-[11px] text-[var(--color-over)]">
             {error} Die bisherige Kombination bleibt aktiv.
           </p>
         )}
