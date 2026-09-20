@@ -43,7 +43,10 @@ pub fn set_size<R: Runtime>(
             // opens outwards to both sides.
             let x = frame.origin.x - (width - frame.size.width) / 2.0;
             let y = top - height;
-            let target = clamp_to_screen(ns_window, NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)));
+            let target = clamp_to_screen(
+                ns_window,
+                NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)),
+            );
 
             if duration_ms == 0 {
                 ns_window.setFrame_display(target, true);
@@ -72,10 +75,8 @@ pub fn set_size<R: Runtime>(
         // Asked for versus arrived at: the two must agree, or the content is
         // being clipped.
         #[cfg(debug_assertions)]
-        if let (Ok(size), Ok(scale)) = (
-            corners_window.inner_size(),
-            corners_window.scale_factor(),
-        ) {
+        if let (Ok(size), Ok(scale)) = (corners_window.inner_size(), corners_window.scale_factor())
+        {
             eprintln!(
                 "[preen] {}: Inhalt {:.0} px -> Fenster {:.0} px",
                 corners_window.label(),
@@ -95,7 +96,13 @@ unsafe fn clamp_to_screen(window: &NSWindow, mut frame: NSRect) -> NSRect {
     let visible = screen.visibleFrame();
     let max_x = visible.origin.x + visible.size.width - frame.size.width - MARGIN;
     let max_y = visible.origin.y + visible.size.height - frame.size.height - MARGIN;
-    frame.origin.x = frame.origin.x.clamp(visible.origin.x + MARGIN, max_x.max(visible.origin.x));
-    frame.origin.y = frame.origin.y.clamp(visible.origin.y + MARGIN, max_y.max(visible.origin.y));
+    frame.origin.x = frame
+        .origin
+        .x
+        .clamp(visible.origin.x + MARGIN, max_x.max(visible.origin.x));
+    frame.origin.y = frame
+        .origin
+        .y
+        .clamp(visible.origin.y + MARGIN, max_y.max(visible.origin.y));
     frame
 }

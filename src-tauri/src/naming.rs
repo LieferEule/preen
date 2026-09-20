@@ -219,7 +219,9 @@ mod tests {
         assert!(looks_machine_generated("hf-20260914-071304-3615fd4d-6b21"));
         assert!(looks_machine_generated("3615fd4d9c114f0e8a77"));
         assert!(looks_machine_generated("0042"));
-        assert!(looks_machine_generated("Bildschirmfoto 2026-09-17 um 21.53.33"));
+        assert!(looks_machine_generated(
+            "Bildschirmfoto 2026-09-17 um 21.53.33"
+        ));
         assert!(looks_machine_generated("IMG_4471"));
         assert!(looks_machine_generated("DSC_0001"));
         assert!(looks_machine_generated("   "));
