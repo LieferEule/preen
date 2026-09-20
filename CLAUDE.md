@@ -50,9 +50,19 @@ Du kannst die App nicht bedienen: keine Finder-Drags, keine Klicks
 Vollbild schon. Tastendrücke gehen über osascript key code. Bilder
 kommen per open -n -a Preen.app --args <bild> hinein, Enter startet
 die Verarbeitung.
-Was ohne GUI prüfbar ist, über preen-cli prüfen. Wenn etwas wirklich
-einen Klick braucht, anhalten und genau sagen, was zu tun ist, statt in
-einer Schleife weiterzuversuchen.
+Was ohne GUI prüfbar ist, über preen-cli prüfen; es ruft dieselbe
+Funktion wie der Tauri-Befehl auf (pipeline::convert):
+  cargo run --features cli --bin preen-cli -- \
+    --preset hero --name testbild --out /tmp/preen-test bild1.jpg
+Presets: inhaltsbild (1600 px, 260 KB), hero (2400 px, 500 KB);
+--json gibt dasselbe maschinenlesbar aus, Exitcode 1 sobald eine
+Datei fehlschlägt.
+--features cli muss sein: ohne das Feature baut cargo das zweite
+Binary nicht, und genau das ist der Punkt. Mit zwei Binaries benennt
+der Tauri-Bundler preen-cli in preen um und packt das Werkzeug statt
+der App ins .app-Bundle.
+Wenn etwas wirklich einen Klick braucht, anhalten und genau sagen, was
+zu tun ist, statt in einer Schleife weiterzuversuchen.
 Erst testen, dann committen, und am Ende jedes Schrittes committen,
 nicht erst am Ende der Etappe. Nicht von selbst committen.
 Autor: LieferEule <206203779+LieferEule@users.noreply.github.com>

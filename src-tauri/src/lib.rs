@@ -4,6 +4,7 @@ pub mod imageio;
 mod naming;
 mod panel;
 pub mod pipeline;
+pub mod preset;
 mod settings;
 mod shortcut;
 mod sizes;
@@ -171,20 +172,19 @@ async fn process_images(
 ) -> Result<BatchResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let images: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-        let first = images.first().ok_or("Keine Bilder ausgewählt")?;
-        let output_dir = pipeline::resolve_output_dir(
-            first,
-            custom_output_dir.as_deref().map(Path::new),
-            &slug,
-            images.len(),
-        );
         let settings = pipeline::Settings {
             max_width,
             max_bytes: max_kb.map(|kb| kb * 1000),
         };
-        pipeline::process_batch(&images, &slug, &output_dir, &settings, |done, total| {
-            let _ = app.emit("preen://progress", Progress { done, total });
-        })
+        pipeline::convert(
+            &images,
+            &slug,
+            custom_output_dir.as_deref().map(Path::new),
+            &settings,
+            |done, total| {
+                let _ = app.emit("preen://progress", Progress { done, total });
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())?

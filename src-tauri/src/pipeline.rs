@@ -97,6 +97,25 @@ pub fn plan_file_names(slug: &str, count: usize, output_dir: &Path) -> Vec<Strin
         .collect()
 }
 
+/// One complete run, from source paths to written files — everything the app
+/// does after the user hits Enter, and the only entry point the Tauri command
+/// and `preen-cli` both go through.
+///
+/// `custom_output_dir` of `None` means "next to the first image"; the folder
+/// rule (subfolder for several images, straight into the target for one) is
+/// [`resolve_output_dir`].
+pub fn convert(
+    images: &[PathBuf],
+    slug: &str,
+    custom_output_dir: Option<&Path>,
+    settings: &Settings,
+    on_progress: impl Fn(usize, usize) + Sync,
+) -> Result<BatchResult, String> {
+    let first = images.first().ok_or("Keine Bilder ausgewählt")?;
+    let output_dir = resolve_output_dir(first, custom_output_dir, slug, images.len());
+    process_batch(images, slug, &output_dir, settings, on_progress)
+}
+
 pub fn process_batch(
     images: &[PathBuf],
     slug: &str,

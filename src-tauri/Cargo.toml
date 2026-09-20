@@ -5,6 +5,22 @@ description = "Bilder web-fertig machen — lokal, ohne Netzwerk"
 authors = ["Jamie Andrew"]
 edition = "2021"
 
+# Das GUI-Binary ist der Normalfall; preen-cli ist Werkzeug und wird nur
+# mit --features cli gebaut. Sonst findet der Tauri-Bundler zwei Binaries
+# und packt das falsche (umbenannt) ins .app.
+[[bin]]
+name = "preen"
+path = "src/main.rs"
+
+[[bin]]
+name = "preen-cli"
+path = "src/bin/preen-cli.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = []
+
 [lib]
 name = "preen_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
