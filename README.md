@@ -8,7 +8,7 @@ da und wieder weg, und rechnet alles auf dem eigenen Rechner.
 <p align="center">
   <img src="docs/panel-ruhe.png" width="200" alt="Preen im Ruhezustand: ein kleines quadratisches Panel mit Federzeichen und dem Text „Bild hierher ziehen“">
   &nbsp;&nbsp;&nbsp;
-  <img src="docs/panel-fertig.png" width="326" alt="Preen nach der Verarbeitung: Dateiname quiraing-skye.webp, 1600 × 1067 px bei Qualität 80, 207 KB aus 1 MB, 80 Prozent der Obergrenze">
+  <img src="docs/panel-fertig.png" width="314" alt="Preen nach der Verarbeitung: Dateiname quiraing-skye.webp, 1600 × 1067 px bei Qualität 80, 207 KB aus 1 MB, 80 Prozent der Obergrenze">
 </p>
 
 ## Installieren
