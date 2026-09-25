@@ -34,6 +34,7 @@ export function Popover(props: {
     <div
       ref={box}
       data-tauri-drag-region="false"
+      data-popover
       role="group"
       aria-label={props.label}
       aria-hidden={!props.open}

@@ -525,7 +525,16 @@ export default function Panel() {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onMouseDownCapture={() => popover && setPopover(null)}
+      // Closes an open popover on a press elsewhere in the panel — but not on
+      // a press inside it, or on the button that toggles it: closing on
+      // mousedown takes the popover's pointer events away before the click
+      // lands, so its rows and sliders never received anything.
+      onMouseDownCapture={(e) => {
+        if (!popover) return;
+        const hit = e.target as Element;
+        if (hit.closest("[data-popover], [aria-expanded]")) return;
+        setPopover(null);
+      }}
     >
       {/* Only opacity changes here; the card underneath keeps its size. */}
       <span
