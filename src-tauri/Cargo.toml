@@ -1,6 +1,6 @@
 [package]
 name = "preen"
-version = "0.1.0"
+version = "0.1.1"
 description = "Bilder web-fertig machen — lokal, ohne Netzwerk"
 authors = ["Jamie Andrew"]
 edition = "2021"
