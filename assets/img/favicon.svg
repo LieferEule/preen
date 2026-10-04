@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Preen">
+  <rect width="1024" height="1024" rx="229" ry="229" fill="#50988d"/>
+  <g fill="#ffffff" shape-rendering="crispEdges">
+    <rect x="512" y="194.6" width="90.7" height="45.3" />
+    <rect x="466.7" y="239.9" width="181.4" height="45.3" />
+    <rect x="421.3" y="285.3" width="90.7" height="90.7" />
+    <rect x="557.3" y="285.3" width="136" height="45.3" />
+    <rect x="557.3" y="330.6" width="181.4" height="136" />
+    <rect x="376" y="376" width="136" height="136" />
+    <rect x="557.3" y="466.7" width="136" height="90.7" />
+    <rect x="421.3" y="512" width="90.7" height="90.7" />
+    <rect x="557.3" y="557.3" width="90.7" height="45.3" />
+    <rect x="466.7" y="602.7" width="45.3" height="45.3" />
+    <rect x="557.3" y="602.7" width="45.3" height="45.3" />
+    <rect x="512" y="648" width="90.7" height="181.4" />
+  </g>
+</svg>
