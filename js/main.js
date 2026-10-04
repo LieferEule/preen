@@ -82,7 +82,7 @@
       else hero.style.removeProperty("--hero-img-h");
       if (!bmp || bmp.src !== himg.currentSrc) {
         bmp = new Image();
-        bmp.onload = drawHero;
+        bmp.onload = function () { (bmp.decode ? bmp.decode() : Promise.resolve()).then(drawHero, drawHero); };   /* Safari: erst dekodiert abtasten, sonst bleibt die Abtastung leer und die Zellen werden schwarz */
         bmp.src = himg.currentSrc || himg.src;
         return;
       }
@@ -202,6 +202,7 @@
       sctx.drawImage(bmp, cx0, cy0, cx1 - cx0, cy1 - cy0,
         (cx0 - qx) / qw * cols, (cy0 - qy) / qh * rows, (cx1 - cx0) / qw * cols, (cy1 - cy0) / qh * rows);
       var px = sctx.getImageData(0, 0, cols, rows).data;
+      if (px[((rows >> 1) * cols + (cols >> 1)) * 4 + 3] === 0 && (drawHero.tries = (drawHero.tries || 0) + 1) < 6) { setTimeout(heroRun, 150); return; }   /* Mitte leer: Bild noch nicht bereit, gleich noch einmal */
       /* Randzellen ohne volle Deckung: Farbe vom Nachbarn links oder oben uebernehmen */
       for (var pr = 0; pr < rows; pr++) for (var pc = 0; pc < cols; pc++) {
         var pi = (pr * cols + pc) * 4;
@@ -1100,11 +1101,11 @@
       /* nach dem Verteilen alle Karten etwas kleiner: mehr Luft zueinander, die Plaetze bleiben */
       fpos = base.map(function (b, i) { return { w: b.w, h: b.h, ar: b.w / b.h, arTxt: null, rot: b.rot, bw: b.bw * best.k * 0.96, x: best.P[i].x, y: best.P[i].y, k: best.k * 0.96, col: 0, row: 0, rc: 1 }; });
       /* Handy (Jamie 05.10.2026: "um den Satz wie am Desktop"): die Bilder liegen als lockerer Ring um den Satz, drei
-         darueber, eines rechts neben der kurzen letzten Zeile (das KI-Label bleibt ganz im Bild), zwei darunter.
+         darueber und drei darunter, spiegelbildlich.
          Keine Karte ueberdeckt eine andere oder den Satz. Werte: Mitte x und Breite als Anteil der Inhaltsbreite,
          Mitte y in Pixeln eines 874 px hohen Schirms ab der Bildmitte (skaliert mit der echten Hoehe) */
-      var FSLOT = { bruecke: [-0.28, -275, 0.4], leuchtturm: [0.32, -262, 0.28], moor: [0.02, -165, 0.36],
-        wald: [0.4, 118, 0.26], hafen: [-0.26, 175, 0.34], wasserfall: [0.16, 275, 0.32] };   /* wald liegt rechts neben dem Satz und geht spaeter in die untere Reihe: keine Karte kreuzt den Satz */
+      var FSLOT = { bruecke: [-0.25, -255, 0.38], leuchtturm: [0.27, -228, 0.3], moor: [0, -150, 0.3],
+        wald: [0, 150, 0.3], hafen: [-0.27, 228, 0.3], wasserfall: [0.25, 255, 0.34] };   /* Jamie 05.10.2026 "zentriert": oben und unten spiegelbildlich um den Satz */
       if (narrow) {
         var CW = vw - 2 * gut0, ky = Math.min(1, vh / 874);
         fvis.forEach(function (c, i) {
@@ -1141,10 +1142,9 @@
       shift -= head / 2;
       fgrid = { cols: cols2, gap: gap, tile: tile, pitch: pitch, top: tbox[1] - shift + G, shift: shift };
       if (narrow) {
-        /* Handy: eine Reihe ueber dem Satz, eine darunter. Die Karten oben bleiben oben, keine kreuzt den Text, der Satz bleibt stehen */
+        /* Handy wie Desktop (Jamie 05.10.2026): der Satz rueckt hoch, alle sechs Bilder landen als Raster darunter */
         tile = Math.min(tile, (gw - (cols2 - 1) * gap) / cols2);
-        fgrid.tile = tile; fgrid.shift = 0;
-        fgrid.rowY = [-tbox[1] - G0 - labelH - tile / 2, tbox[1] + G0 + tile / 2];
+        fgrid.tile = tile;
       }
       fpos.forEach(function (q, i) { if (q.row === 0 && q.col === (narrow ? q.rc - 1 : Math.floor((q.rc - 1) / 2))) ftop = i; });   /* oben auf den Stapel: das mittlere Bild der ersten Reihe. Handy: das rechte, so liegt beim Zusammenschieben jede Karte unter ihrer rechten Nachbarin und kein KI-Label wird verdeckt */
       fpos.forEach(function (q) { q.srk = narrow ? (q.row === 0 ? q.rc - 2 - q.col : 2 + q.col + q.row * q.rc) : -1; });   /* Handy: Rang im Stapel nach Spalte, links liegt hinten */
@@ -1213,7 +1213,7 @@
             if (Math.abs(px2) < tbox[0] + hwT && Math.abs(py2 + sh) < tbox[1] + hwT) cross = true;
           }
           var p1x = (C.x + tx) / 2, p1y = (C.y + ty) / 2;
-          if (cross) {
+          if (cross && !fnarrow) {   /* Handy: kein Platz fuer den Umweg am Rand, die Karte gleitet direkt und liegt dabei ueber dem Satz */
             var side = (C.x || tx) < 0 ? -1 : 1, midX = side * Math.min(tbox[0] + hwT + FM, vw / 2 - hwT - 4);   /* ganz neben dem Satz vorbei, soweit Platz ist */
             p1x = 2 * midX - (C.x + tx) / 2;   /* die Kurve erreicht in der Mitte genau midX */
           }
@@ -1243,7 +1243,7 @@
           if (C.arTxt !== arS) { card.style.aspectRatio = arS; C.arTxt = arS; }
         }
         var srk2 = fnarrow ? C.srk : i < ftop ? i : i - 1;
-        card.style.zIndex = sp > 0 ? (i === ftop ? "10" : fnarrow ? String(srk2 < 2 ? 9 - srk2 : 2 + C.col) : "") : "";   /* Handy: rechts liegt immer oben, so deckt keine Karte das Label ihrer rechten Nachbarin */
+        card.style.zIndex = sp > 0 ? (i === ftop ? "10" : fnarrow ? String(srk2 < 2 ? 9 - srk2 : 2 + C.col) : "") : fnarrow && leave > 0 && leave < 1 ? "3" : "";   /* Handy: beim Durchgleiten ueber dem Satz, das KI-Label bleibt sichtbar */   /* Handy: rechts liegt immer oben, so deckt keine Karte das Label ihrer rechten Nachbarin */
         if (files[i]) files[i].classList.toggle("is-in", landed && (fnarrow ? spAll === 0 : sp === 0));   /* Handy: alle Namen gehen gemeinsam */   /* die Namen gehen, sobald sich die Bilder stapeln */
         if (sp > 0) {
           card.style.transform = "translate(-50%, -50%) translate(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px) rotate(" + r.toFixed(2) + "deg) scale(" + s.toFixed(3) + ")";
