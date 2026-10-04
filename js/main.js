@@ -600,7 +600,20 @@
     var ro = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("is-in"); ro.unobserve(e.target); } });
     }, { threshold: 0.35 });
-    
+    /* Headlines: einmal beim ersten Hineinscrollen. Beobachtet wird der Block drumherum: eine ganz weggeschnittene
+       Zeile (Wisch) zaehlt sonst als unsichtbar und wuerde nie ausgeloest */
+    var hro = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        hro.unobserve(e.target);
+        e.target.querySelectorAll("[data-reveal]").forEach(function (h) { h.classList.add("is-in"); });
+      });
+    }, { rootMargin: "0px 0px -15% 0px" });
+    document.querySelectorAll("[data-reveal]").forEach(function (el) {
+      var box = el.parentElement;                                 /* display: contents (Idee mobil) hat keine Box */
+      while (getComputedStyle(box).display === "contents") box = box.parentElement;
+      hro.observe(box);
+    });
   }
 
   /* ---------- Idee: Durchlauf in der Buehne als Animation. Eine Zeitleiste rechnet jeden Frame alle Werte aus der Zeit t:
