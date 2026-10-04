@@ -97,7 +97,7 @@
       var W = hero.clientWidth, H = hero.clientHeight;
       var cols = Math.ceil(W / cell), rows = Math.ceil(H / cell);
       var fl = function (v) { return Math.floor(v / cell); }, ce = function (v) { return Math.ceil(v / cell); };
-      var wide = window.innerWidth >= 600;
+      var wide = true;   /* Aufbau wie am Desktop auf allen Breiten (Jamie 05.10.2026): steigende Welle, Aussparung fuer den Text */
 
       /* Aussparung unten rechts aufs Raster legen, damit der Text genau mittig im Weiss sitzt */
       wrap.style.width = ""; wrap.style.height = "";
@@ -135,11 +135,7 @@
          damit die geloesten Zellen keine gerade Linie bilden. Unter der Headline setzt das Foto direkt an
          ihrer Unterkante an, die Zellen darueber reichen in die Schrift hinein. */
       var jag = function (c) { return Math.floor(hash(c >> 1, 7) * 3) + Math.round(Math.sin(c * 0.45 + 1.3) * 1.3); };
-      /* Handy (Jamie 04.10.2026: "Welle quer, aber schoener"): Ober- und Unterkante als ruhige Pixelwelle ueber die
-         ganze Breite, gegeneinander versetzt, so schwingt das Band. Keine Zufallsstufen */
-      var waveS = function (c, up) { var u = c / Math.max(1, cols - 1); return Math.max(0, Math.round(2.5 + 2.5 * Math.sin(u * Math.PI * 3 + (up ? Math.PI : 0) + 0.5))); };   /* echte Welle: anderthalb Schwuenge ueber die Breite, oben und unten gegenlaeufig */
       var topAt = function (c) {
-        if (!wide) return sT + waveS(c, true);   /* oben: links tief, rechts hoch, wie am Desktop */
         var low = hB + 2;
         if (c <= hR) return low + jag(c);
         var u = Math.min(1, (c - hR) / Math.max(1, cols - hR));
@@ -153,7 +149,7 @@
         for (var c = 0; c < cols; c++) {
           var i = r * cols + c;
           var inStage = r >= sT && r < sB && c >= sL && c < sR;
-          var cut = r < topAt(c) || (sB < rows && r >= sB - (wide ? Math.max(0, jag(c + 50)) : waveS(c, false)));   /* auch die Unterkante springt */
+          var cut = r < topAt(c) || (sB < rows && r >= sB - Math.max(0, jag(c + 50)));   /* auch die Unterkante springt */
           if (wide) {
             if (c >= nL && r >= nT) cut = true;                          /* Aussparung fuer den Text */
           }
@@ -212,6 +208,14 @@
         if (px[pi + 3] === 255) continue;
         var ni = pc > 0 ? pi - 4 : pr > 0 ? pi - cols * 4 : -1;
         if (ni >= 0) { px[pi] = px[ni]; px[pi + 1] = px[ni + 1]; px[pi + 2] = px[ni + 2]; px[pi + 3] = 255; }
+      }
+      /* Safari: ragt das Raster oben oder links ueber das abgetastete Bild, bleiben ganze Zeilen leer und die Zellen
+         wurden schwarz. Zweiter Durchlauf von unten rechts: leere Zellen nehmen die Farbe von unten oder rechts */
+      for (var qr = rows - 1; qr >= 0; qr--) for (var qc = cols - 1; qc >= 0; qc--) {
+        var qi = (qr * cols + qc) * 4;
+        if (px[qi + 3] === 255) continue;
+        var nj = qr < rows - 1 ? qi + cols * 4 : qc < cols - 1 ? qi + 4 : -1;
+        if (nj >= 0 && px[nj + 3] === 255) { px[qi] = px[nj]; px[qi + 1] = px[nj + 1]; px[qi + 2] = px[nj + 2]; px[qi + 3] = 255; }
       }
 
       var dpr = window.devicePixelRatio || 1, cd = cell * dpr;
@@ -279,7 +283,7 @@
           var inNotch = wide && cc >= nL && rr >= nT;                 /* die Textaussparung bleibt rein weiss */
           var lastCut = rr === rows - 1 && H - rr * cell < cell * 0.75; /* keine lose Zelle in der angeschnittenen letzten Reihe */
           if (core[j2]) {
-            if (!safe[j2] && dist[j2] < (wide ? HOLE.length : 2) && noise(cc, rr) < HOLE[dist[j2]] * right * (wide ? 1 : 0)) { fill = white; when = 650 + noise(cc + 9, rr) * 150; }   /* schmal: Loecher nur in der ersten Reihe, nie mitten auf der Strasse */
+            if (!safe[j2] && dist[j2] < (wide ? HOLE.length : 2) && noise(cc, rr) < HOLE[dist[j2]] * right) { fill = white; when = 650 + noise(cc + 9, rr) * 150; }   /* schmal: Loecher nur in der ersten Reihe, nie mitten auf der Strasse */
             else if (wide && !safe[j2] && rr < sT + 3 && muddy(j2) && lum(j2) > 0.55) { fill = white; when = 650; }   /* Nebel oben an der Welle loest sich: die gruene Kante bildet die Oberkante */
             else kind[j2] = 1;
           } else {
@@ -290,7 +294,7 @@
               fill = "rgb(" + px[ao] + "," + px[ao + 1] + "," + px[ao + 2] + ")";
               kind[j2] = 2;
               when = 700 + noise(cc + 41, rr) * 200;
-            } else if (!safe[j2] && !inNotch && !lastCut && dist[j2] < LOOSE.length && cc >= 2 && cc < cols - 2 && !bright(j2) && noise(cc + 311, rr) < LOOSE[dist[j2]] * right * (wide ? 1 : 0)) {
+            } else if (!safe[j2] && !inNotch && !lastCut && dist[j2] < LOOSE.length && cc >= 2 && cc < cols - 2 && !bright(j2) && noise(cc + 311, rr) < LOOSE[dist[j2]] * right) {
               fill = rgbAt(muddy(j2) ? greenNear(cc, Math.min(rows - 1, rr + 1)) : j2);   /* graue oder schwarze Zelle bekommt das Gruen vom Hang daneben */
               kind[j2] = 2;
               when = 700 + noise(cc + 41, rr) * 200;             /* lose Pixel springen zuletzt ab */
@@ -723,8 +727,7 @@
         var W = dP.w, H = dP.h, bw = dP.bw, bh = dP.bh;
         var bIn = eOut(seg(t, BIN, BIN + 550)), drift = eInOut(seg(t, ZOOM0, KUP)), bOut = eInOut(seg(t, BOUT, BOUT + 450));
         var sc = 1 + 0.04 * drift;   /* die Kamera kommt nur einen Hauch naeher */
-        if (W < 480) sc = (W - 32) / bw * (1 + 0.04 * drift);   /* 16 px Rand je Seite */   /* Handy: die ganze Tastatur mittig, kein Anschnitt mitten durch die Tasten */
-        var tx = W < 480 ? (W - bw * sc) / 2 : W * 0.97 - bw * sc, ty = (W < 480 ? (H - bh * sc) / 2 : H * 0.86 - bh * sc) + H * 0.08 * (1 - bIn) + H * 0.1 * bOut;   /* Handy: mittig in der Buehne */
+        var tx = W * 0.97 - bw * sc, ty = H * 0.86 - bh * sc + H * 0.08 * (1 - bIn) + H * 0.1 * bOut;   /* nur die rechte Haelfte, wie am Desktop (Jamie 05.10.2026) */
         dSet(dBoard, bIn * (1 - bOut), "translate(" + tx.toFixed(1) + "px, " + ty.toFixed(1) + "px) scale(" + sc.toFixed(4) + ")");
         dKeys.forEach(function (k, i) {
           var down = t >= KDOWN[i] && t < KUP;
@@ -819,8 +822,14 @@
         bit.className = "px-bit px-bit--l";
         bit.style.background = cssVar(rootS, colors[i % colors.length]);
         var x = r.left + Math.random() * r.width, y = r.top + Math.random() * r.height * 0.7;
-        bit.style.left = x + "px"; bit.style.top = y + "px";
-        document.body.appendChild(bit);
+        if (touchUI) {   /* Touch: die Truemmer haengen an der Szene und scrollen mit ihr hinaus, statt kurz ueber den Quellen stehen zu bleiben */
+          var pr0 = pin.getBoundingClientRect();
+          bit.style.position = "absolute"; bit.style.left = (x - pr0.left) + "px"; bit.style.top = (y - pr0.top) + "px";
+          pin.appendChild(bit);
+        } else {
+          bit.style.left = x + "px"; bit.style.top = y + "px";
+          document.body.appendChild(bit);
+        }
         var dx = (x - (r.left + r.width / 2)) * 0.8 + (Math.random() - 0.5) * 30, dy = -40 - Math.random() * 50;
         var anim = bit.animate([
           { transform: "translate(-50%, -50%)", opacity: 1 },
@@ -1090,23 +1099,21 @@
       }
       /* nach dem Verteilen alle Karten etwas kleiner: mehr Luft zueinander, die Plaetze bleiben */
       fpos = base.map(function (b, i) { return { w: b.w, h: b.h, ar: b.w / b.h, arTxt: null, rot: b.rot, bw: b.bw * best.k * 0.96, x: best.P[i].x, y: best.P[i].y, k: best.k * 0.96, col: 0, row: 0, rc: 1 }; });
-      /* Handy (Jamie 04.10.2026: "Bilder sauklein"): feste, grosse Plaetze statt Verteilen. Drei Bilder ueber dem Satz,
-         drei darunter, leicht ueberlappend wie hingeworfene Abzuege. Jede KI-Kennzeichnung oben links bleibt frei.
-         Werte: Mitte x und Breite als Anteil der Inhaltsbreite, Mitte y als Anteil der freien Hoehe ueber oder unter dem Satz */
-      var FSLOT = { bruecke: [-0.26, 0.28, 0.48, 0], leuchtturm: [0.28, 0.50, 0.40, 0], wald: [-0.01, 0.80, 0.28, 0],
-        hafen: [0.27, 0.30, 0.36, 1], wasserfall: [-0.24, 0.44, 0.40, 1], moor: [0.19, 0.76, 0.52, 1] };
+      /* Handy (Jamie 05.10.2026: "um den Satz wie am Desktop"): die Bilder liegen als lockerer Ring um den Satz, drei
+         darueber, eines rechts neben der kurzen letzten Zeile (das KI-Label bleibt ganz im Bild), zwei darunter.
+         Keine Karte ueberdeckt eine andere oder den Satz. Werte: Mitte x und Breite als Anteil der Inhaltsbreite,
+         Mitte y in Pixeln eines 874 px hohen Schirms ab der Bildmitte (skaliert mit der echten Hoehe) */
+      var FSLOT = { bruecke: [-0.28, -275, 0.4], leuchtturm: [0.32, -262, 0.28], moor: [0.02, -165, 0.36],
+        wald: [0.4, 118, 0.26], hafen: [-0.26, 175, 0.34], wasserfall: [0.16, 275, 0.32] };   /* wald liegt rechts neben dem Satz und geht spaeter in die untere Reihe: keine Karte kreuzt den Satz */
       if (narrow) {
-        var CW = vw - 2 * gut0, topA = -vh / 2 + head0 + FM * 2, topB = -tbox[1] - FM / 2, botA = tbox[1] + FM / 2, botB = vh / 2 - FM * 2;   /* 40 px Luft zu Navbar und Unterkante */
-        var Ht = Math.max(0, topB - topA), Hb = Math.max(0, botB - botA);
+        var CW = vw - 2 * gut0, ky = Math.min(1, vh / 874);
         fvis.forEach(function (c, i) {
           var nm = ((c.querySelector("img").getAttribute("src") || "").match(/ph-ki-foto-\d+-([a-z]+)/) || [0, ""])[1], sl = FSLOT[nm];
           if (!sl) return;
-          var b = base[i], H = sl[3] ? Hb : Ht;
-          var w = Math.min(sl[2] * CW, H * 0.8 * b.w / b.h);   /* niedrige Fenster: nie hoeher als die freie Flaeche */
-          var kk = w / b.w;
+          var b = base[i], kk = sl[2] * CW * ky / b.w;   /* niedrige Fenster: alles etwas kleiner und naeher am Satz */
           fpos[i].k = kk; fpos[i].bw = b.bw * kk;
           fpos[i].x = sl[0] * CW;
-          fpos[i].y = sl[3] ? botA + sl[1] * Hb : topA + sl[1] * Ht;
+          fpos[i].y = sl[1] * ky;
         });
       }
       fnarrow = narrow;
@@ -1186,7 +1193,6 @@
         var dir = C.x < 0 ? -1 : 1, out = dir * (vw / 2 + C.bw * 0.6);
         var lag = (C.y < 0 ? 0.15 : 0) + (fnarrow ? 0 : (i % 3) * 0.04);   /* Handy: eine Reihe blendet gemeinsam ein, keine Doppelbelichtung */
         var arrive = fnarrow ? clamp01((enter - 0.18 - lag) / 0.18) : clamp01((enter - 0.15 - lag) / 0.55), e = 1 - Math.pow(1 - arrive, 3);   /* kommt seitlich, bremst sanft. Handy: erst, wenn die Sektion gut im Bild ist */
-        if (fnarrow) out = C.x;   /* Handy: kein Einflug von ausserhalb, sonst stuende ein KI-Bild ohne sichtbares Label am Rand */
         var x = out + (C.x - out) * e, y = C.y * (0.85 + 0.15 * e), r = C.rot * (1 + (1 - e) * 1.5), s = C.k * (1 + 0.12 * (1 - e)), ar = C.ar;
         var mid = (C.rc - 1) / 2, lagL = fnarrow ? C.row * 0.02 : Math.abs(C.col - mid) * 0.03 + C.row * 0.02;   /* schmal: eine Reihe landet zusammen, die Namen erscheinen gemeinsam */   /* gestaffelt nach Spalte und Reihe: nie zwei Karten gleichzeitig auf derselben Bahn */
         var leave = clamp01((p - 0.3 - lagL) / 0.4);               /* innere Spalten zuerst; alle Karten landen sicher, bevor der Stapel beginnt */
@@ -1216,7 +1222,8 @@
         }
         card.style.transform = "translate(-50%, -50%) translate(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px) rotate(" + r.toFixed(2) + "deg) scale(" + s.toFixed(3) + ")";
         /* schmal ist neben dem Satz kein Platz: dort tauchen die kleinen Karten kurz unter dem Text weg und unten wieder auf */
-        card.style.opacity = fnarrow && e < 1 ? e.toFixed(3) : "";   /* Handy: blendet am Platz ein. Breit: der Satz liegt ueber den Karten, wer darunter durchgleitet, blinkt nicht */
+        var kiL = x - C.w * s / 2 + vw / 2, kiIn = fnarrow && e < 1 ? Math.min(clamp01((kiL - 4) / 32), clamp01((vw - 4 - kiL - (C.ki || 0)) / 32)) : 1;   /* Handy: sichtbar erst, wenn das KI-Label oben links ganz im Bild ist */
+        card.style.opacity = kiIn < 1 ? kiIn.toFixed(3) : "";   /* breit: der Satz liegt ueber den Karten, wer darunter durchgleitet, blinkt nicht */
         var arTxt = ar === C.ar ? "" : ar.toFixed(3);
         if (C.arTxt !== arTxt) { card.style.aspectRatio = arTxt; C.arTxt = arTxt; }   /* nur bei Aenderung; contain: layout haelt das Layout in der Karte */
         card.classList.toggle("is-small", leave > 0.4);
