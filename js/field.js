@@ -115,8 +115,9 @@
     return u < 2 ? C[0] : u < 5 ? C[1] : u < 8 ? C[2] : u < 10 ? C[1] : u < 12 ? C[0] : 0;   /* an, hell, wieder leise, aus; danach Ruhe */
   };
   var img, u32, mask, capm, N = 0, Wd = 0, lastR0, HEAL = 650, STEP = 1000 / 12, M = 4;
+  var TOUCH = matchMedia("(pointer: coarse)").matches;   /* Touch: eine ganze Bildschirmhoehe Puffer oben und unten, schnelles Wischen und die Adressleiste zeigen nie einen Rand */
   var draw = function (t, now) {
-    var sy = win.scrollY, vh = win.innerHeight, R0 = floor(sy / cell) - M, n = ceil(vh / cell) + 2 * M + 1;
+    var sy = win.scrollY, vh = win.innerHeight, Mx = TOUCH ? ceil(vh / cell) : M, R0 = floor(sy / cell) - Mx, n = ceil(vh / cell) + 2 * Mx + 1;
     var c, k, e, i, j;
     if (n !== N || cols !== Wd) {
       N = n; Wd = cv.width = cols; cv.height = N;
@@ -266,7 +267,9 @@
   layout();
   kick();
   win.addEventListener("scroll", kick, { passive: true });
-  win.addEventListener("resize", later);
+  /* Touch: die Adressleiste aendert nur die Hoehe, dafuer reicht der naechste Scroll-Frame (draw liest innerHeight selbst) */
+  var coarse = matchMedia("(pointer: coarse)").matches, lw = win.innerWidth;
+  win.addEventListener("resize", function () { if (coarse && win.innerWidth === lw) { dirty = true; kick(); return; } lw = win.innerWidth; later(); });
   document.addEventListener("visibilitychange", kick);
 
   /* Mausspur auf dunklen Flaechen: bis zu acht Zellen, eine Stufe heller als der Grund, heilen in 0,65 s */
@@ -287,7 +290,7 @@
       kick();
     }, { passive: true });
   }
-  var lt = 0, laterRO = function () { if (lt) return; lt = setTimeout(function () { lt = 0; if (cell) { layout(); kick(); } }, STEP); };   /* Hoehen aendern sich in Animationen je Frame: hoechstens einmal je Feldtakt neu vermessen */
+  var lt = 0, laterRO = function () { if (lt) return; var go = function () { lt = 0; if (cell) { layout(); kick(); } }; lt = TOUCH ? requestAnimationFrame(go) : setTimeout(go, STEP); };   /* Touch: je Frame, die Fugen laufen beim Aufklappen der Fragen nicht hinterher */   /* Hoehen aendern sich in Animationen je Frame: hoechstens einmal je Feldtakt neu vermessen */
   if (win.ResizeObserver) new ResizeObserver(laterRO).observe(body);   /* FAQ und Bilder aendern Hoehen */
   if (document.fonts) document.fonts.ready.then(later);
 })();

@@ -5,6 +5,28 @@
   var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var cssVar = function (el, name) { return getComputedStyle(el).getPropertyValue(name).trim(); };
 
+  /* Touch-Geraete (iOS, Android): Die Adressleiste blendet beim Scrollen ein und aus und aendert dabei nur die
+     Fensterhoehe. Darauf darf keine Szene neu rechnen, sonst springen Waage und Bilderflug mitten im Scrollen.
+     viewH() ist dort die kleine, stabile Hoehe (100svh, wie die Pins), onResize() reagiert nur auf neue Breiten.
+     Desktop (feiner Zeiger) bleibt unveraendert: innerHeight und jedes resize */
+  var touchUI = window.matchMedia("(pointer: coarse)").matches;
+  var vProbe = document.createElement("div"), vhPx = 0;
+  vProbe.style.cssText = "position:absolute;visibility:hidden;height:100svh;width:0;top:0;pointer-events:none";
+  document.body.appendChild(vProbe);
+  var viewH = function () {
+    if (!touchUI) return window.innerHeight;
+    return vhPx || (vhPx = vProbe.offsetHeight || window.innerHeight);
+  };
+  var onResize = function (fn) {
+    var lw = function () { return touchUI ? document.documentElement.clientWidth : window.innerWidth; };   /* Touch: Layoutbreite, Pinch-Zoom aendert sie nicht */
+    var w = lw();
+    window.addEventListener("resize", function (e) {
+      if (touchUI && lw() === w) return;
+      w = lw(); vhPx = 0;
+      fn(e);
+    });
+  };
+
   /* ---------- Kopf: oben ohne Flaeche, beim Scrollen durchscheinendes Glas (inspo/NOTIZEN.md: transparent) ---------- */
   var header = document.querySelector("[data-header]");
   if (header) {
@@ -113,8 +135,11 @@
          damit die geloesten Zellen keine gerade Linie bilden. Unter der Headline setzt das Foto direkt an
          ihrer Unterkante an, die Zellen darueber reichen in die Schrift hinein. */
       var jag = function (c) { return Math.floor(hash(c >> 1, 7) * 3) + Math.round(Math.sin(c * 0.45 + 1.3) * 1.3); };
+      /* Handy (Jamie 04.10.2026: "Welle quer, aber schoener"): Ober- und Unterkante als ruhige Pixelwelle ueber die
+         ganze Breite, gegeneinander versetzt, so schwingt das Band. Keine Zufallsstufen */
+      var waveS = function (c, up) { var u = c / Math.max(1, cols - 1); return Math.max(0, Math.round(2.5 + 2.5 * Math.sin(u * Math.PI * 3 + (up ? Math.PI : 0) + 0.5))); };   /* echte Welle: anderthalb Schwuenge ueber die Breite, oben und unten gegenlaeufig */
       var topAt = function (c) {
-        if (!wide) return sT + Math.max(0, jag(c));
+        if (!wide) return sT + waveS(c, true);   /* oben: links tief, rechts hoch, wie am Desktop */
         var low = hB + 2;
         if (c <= hR) return low + jag(c);
         var u = Math.min(1, (c - hR) / Math.max(1, cols - hR));
@@ -128,7 +153,7 @@
         for (var c = 0; c < cols; c++) {
           var i = r * cols + c;
           var inStage = r >= sT && r < sB && c >= sL && c < sR;
-          var cut = r < topAt(c) || (sB < rows && r >= sB - Math.max(0, jag(c + 50)));   /* auch die Unterkante springt */
+          var cut = r < topAt(c) || (sB < rows && r >= sB - (wide ? Math.max(0, jag(c + 50)) : waveS(c, false)));   /* auch die Unterkante springt */
           if (wide) {
             if (c >= nL && r >= nT) cut = true;                          /* Aussparung fuer den Text */
           }
@@ -254,7 +279,7 @@
           var inNotch = wide && cc >= nL && rr >= nT;                 /* die Textaussparung bleibt rein weiss */
           var lastCut = rr === rows - 1 && H - rr * cell < cell * 0.75; /* keine lose Zelle in der angeschnittenen letzten Reihe */
           if (core[j2]) {
-            if (!safe[j2] && dist[j2] < (wide ? HOLE.length : 2) && noise(cc, rr) < HOLE[dist[j2]] * right) { fill = white; when = 650 + noise(cc + 9, rr) * 150; }   /* schmal: Loecher nur in der ersten Reihe, nie mitten auf der Strasse */
+            if (!safe[j2] && dist[j2] < (wide ? HOLE.length : 2) && noise(cc, rr) < HOLE[dist[j2]] * right * (wide ? 1 : 0)) { fill = white; when = 650 + noise(cc + 9, rr) * 150; }   /* schmal: Loecher nur in der ersten Reihe, nie mitten auf der Strasse */
             else if (wide && !safe[j2] && rr < sT + 3 && muddy(j2) && lum(j2) > 0.55) { fill = white; when = 650; }   /* Nebel oben an der Welle loest sich: die gruene Kante bildet die Oberkante */
             else kind[j2] = 1;
           } else {
@@ -265,7 +290,7 @@
               fill = "rgb(" + px[ao] + "," + px[ao + 1] + "," + px[ao + 2] + ")";
               kind[j2] = 2;
               when = 700 + noise(cc + 41, rr) * 200;
-            } else if (!safe[j2] && !inNotch && !lastCut && dist[j2] < LOOSE.length && cc >= 2 && cc < cols - 2 && !bright(j2) && noise(cc + 311, rr) < LOOSE[dist[j2]] * right) {
+            } else if (!safe[j2] && !inNotch && !lastCut && dist[j2] < LOOSE.length && cc >= 2 && cc < cols - 2 && !bright(j2) && noise(cc + 311, rr) < LOOSE[dist[j2]] * right * (wide ? 1 : 0)) {
               fill = rgbAt(muddy(j2) ? greenNear(cc, Math.min(rows - 1, rr + 1)) : j2);   /* graue oder schwarze Zelle bekommt das Gruen vom Hang daneben */
               kind[j2] = 2;
               when = 700 + noise(cc + 41, rr) * 200;             /* lose Pixel springen zuletzt ab */
@@ -396,7 +421,7 @@
       if (himg.complete) heroRun(); else himg.addEventListener("load", heroRun);
     });
     var heroTimer, lastW = window.innerWidth;
-    window.addEventListener("resize", function () {
+    onResize(function () {
       if (window.innerWidth === lastW) return;                  /* iOS: Adressleiste aendert nur die Hoehe */
       lastW = window.innerWidth;
       clearTimeout(heroTimer); heroTimer = setTimeout(heroRun, 120);
@@ -416,7 +441,7 @@
       hero.style.setProperty("--hero-stick", -stickStart + "px");
     };
     var hdrEl = document.querySelector("[data-header]");
-    var nextEl = hero.nextElementSibling;
+    var nextEl = hero.nextElementSibling, nextPin = nextEl && nextEl.querySelector(".warum__pin");
     var EAT = 0.6, BUILD = 0.3;                                 /* Anteile der Bildschirmhoehe: erst zerfaellt der Hero ins Weiss, dann setzen sich Warum und Navbar zusammen */
     var gone = function (c, r) { return 0.65 * hash(c + 3, r + 11) + 0.35 * hash((c >> 2) + 5, (r >> 2) + 19); };   /* verstreut, mit kleinen Nestern */
     var back = function (c, r) { return hash(c + 71, r + 29); };
@@ -440,7 +465,7 @@
       eatTick = false;
       var vh = svh.offsetHeight, y = window.scrollY - stickStart;
       var p = Math.min(1, Math.max(0, y / (vh * EAT)));
-      var q = Math.min(1, Math.max(0, (y - vh * EAT) / (vh * BUILD)));
+      var q = Math.min(1, Math.max(0, (y - vh * (touchUI ? EAT * 0.2 : EAT)) / (vh * BUILD)));   /* Touch: Warum baut sich schon auf, waehrend der Hero zerfaellt, nie ein leerer Bildschirm */
       var cell = grid ? grid.cell : 0;
       /* Stufen statt Gleiten: 48 Zerfall- und 24 Aufbau-Stufen (etwa 11 px Scroll je Stufe), die Maske wird nur je Stufe neu gebaut */
       if (p > 0 && p < 1) p = Math.max(1 / 48, Math.round(p * 48) / 48);
@@ -455,13 +480,23 @@
       var cols = cell ? Math.ceil(heroW / cell) : 0, rows = cell ? Math.ceil(heroH / cell) : 0;
       /* Hero. Ganz zerfallen: auf null Flaeche beschnitten, die Headline bleibt im Barrierefreiheitsbaum */
       hero.classList.toggle("is-eating", p > 0);
+      if (touchUI) {   /* Touch: Schrift ist weg, bevor die Zellen sie erreichen (erstes Fuenftel) */
+        var tOp = p > 0 ? Math.max(0, 1 - p * 5).toFixed(3) : "";
+        head.parentNode.style.opacity = tOp; wrap.style.opacity = tOp;   /* an den Containern: die Schrift hat eigene Uebergaenge, die hier nachhinken wuerden */
+      }
       hero.classList.toggle("is-covered", p >= 1);
-      hero.style.clipPath = p >= 1 ? "inset(50%)" : p > 0 && cell ? cellPath(cols, 0, rows, cell, 0, 0, heroH, function (c, r) { return gone(c, r) >= p; }) : "";
+      var pe = touchUI ? Math.min(1, p * 1.15) : p;   /* Touch: die letzten Zellen gehen gemeinsam, keine verwaiste Zelle im Weiss */
+      hero.style.clipPath = pe >= 1 ? "inset(50%)" : p > 0 && cell ? cellPath(cols, 0, rows, cell, 0, 0, heroH, function (c, r) { return gone(c, r) >= pe; }) : "";
       /* Warum: unsichtbar, solange der Hero zerfaellt (sonst laegen zwei Texte uebereinander), dann setzt sich der
          sichtbare Teil Zelle fuer Zelle zusammen. Unterhalb des Bildschirms steht Warum immer ganz da */
       if (nextEl) {
         var below = Math.max(0, vh - nt);
-        if (!cell || q >= 1) nextEl.style.clipPath = "";
+        if (!cell || q >= 1) { nextEl.style.clipPath = ""; (nextPin || nextEl).style.opacity = ""; }
+        else if (touchUI) {
+          /* Touch: Warum blendet ein, keine halb ausgestanzte Schrift. Unterhalb des Bildschirms ohnehin unsichtbar */
+          nextEl.style.clipPath = "";
+          (nextPin || nextEl).style.opacity = q < 1 ? q.toFixed(3) : "";   /* am Pin, nicht an der 400svh hohen Sektion: WebKit muss keine Riesenebene zusammensetzen */
+        }
         else if (q <= 0) nextEl.style.clipPath = "inset(" + Math.round(Math.min(nh, below)) + "px 0 0 0)";
         else {
           var wr = Math.ceil(Math.min(nh, below) / cell), wc = Math.ceil(nw / cell);
@@ -475,12 +510,12 @@
       var rTop = Math.floor(stickStart / cell), rBot = Math.ceil((stickStart + hh) / cell);
       hdrEl.classList.toggle("is-past-hero", p >= 1);
       hdrEl.classList.toggle("is-eating", (p > 0 && p < 1) || (p >= 1 && q < 1));
-      if (!cell || p <= 0 || (p >= 1 && q >= 1)) hdrEl.style.clipPath = "";
+      if (!cell || touchUI || p <= 0 || (p >= 1 && q >= 1)) hdrEl.style.clipPath = "";   /* Touch: die Navbar bleibt stehen, ein Anker im Uebergang */
       else if (p < 1) hdrEl.style.clipPath = cellPath(cols, rTop, rBot, cell, stickStart, 0, hh, function (c, r) { return gone(c, r) >= p; });
       else hdrEl.style.clipPath = cellPath(cols, rTop, rBot, cell, stickStart, 0, hh, function (c, r) { return back(c, r) < q; });
     };
     placeHero();
-    window.addEventListener("resize", function () { placeHero(); lastKey = ""; updateEat(); });
+    onResize(function () { placeHero(); lastKey = ""; updateEat(); });
     if (!reduce) {
       root.classList.add("eat-on");
       window.addEventListener("scroll", function () { if (!eatTick) { eatTick = true; requestAnimationFrame(updateEat); } }, { passive: true });
@@ -688,7 +723,8 @@
         var W = dP.w, H = dP.h, bw = dP.bw, bh = dP.bh;
         var bIn = eOut(seg(t, BIN, BIN + 550)), drift = eInOut(seg(t, ZOOM0, KUP)), bOut = eInOut(seg(t, BOUT, BOUT + 450));
         var sc = 1 + 0.04 * drift;   /* die Kamera kommt nur einen Hauch naeher */
-        var tx = W * 0.97 - bw * sc, ty = H * 0.86 - bh * sc + H * 0.08 * (1 - bIn) + H * 0.1 * bOut;
+        if (W < 480) sc = (W - 32) / bw * (1 + 0.04 * drift);   /* 16 px Rand je Seite */   /* Handy: die ganze Tastatur mittig, kein Anschnitt mitten durch die Tasten */
+        var tx = W < 480 ? (W - bw * sc) / 2 : W * 0.97 - bw * sc, ty = (W < 480 ? (H - bh * sc) / 2 : H * 0.86 - bh * sc) + H * 0.08 * (1 - bIn) + H * 0.1 * bOut;   /* Handy: mittig in der Buehne */
         dSet(dBoard, bIn * (1 - bOut), "translate(" + tx.toFixed(1) + "px, " + ty.toFixed(1) + "px) scale(" + sc.toFixed(4) + ")");
         dKeys.forEach(function (k, i) {
           var down = t >= KDOWN[i] && t < KUP;
@@ -750,7 +786,7 @@
     new IntersectionObserver(function (es) { es.forEach(function (e) { if (!e.isIntersecting) dReset(); }); }, { threshold: 0 }).observe(demo);
     document.addEventListener("visibilitychange", function () { if (document.hidden) dReset(); else dCheck(); });   /* zurueck im Tab: von vorn */
     new MutationObserver(function () { if (document.documentElement.classList.contains("handoff-on") && !demo.classList.contains("is-born")) dReset(); dCheck(); }).observe(demo, { attributes: true, attributeFilter: ["class"] });
-    window.addEventListener("resize", function () { dP = null; });
+    onResize(function () { dP = null; });
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { dP = null; });   /* Masse nach dem Laden der Schrift neu */
   }
 
@@ -842,7 +878,7 @@
         scene.classList.remove("is-morph");
       }, dur);
     };
-    window.addEventListener("resize", dropGhosts);             /* veraltete Ziele: sofort ins Ziel */
+    onResize(dropGhosts);             /* veraltete Ziele: sofort ins Ziel */
     var lastStep = 0, quickTimer = 0;
     var setStep = function (n) {
       if (n === sCur) return;
@@ -888,7 +924,7 @@
       else morph(n === 3);
       /* Kapitel 3: die Zahlen in den Messkreisen zaehlen mit dem Ring hoch, erst das Original, dann Preen */
       if (n === 3) {
-        var wait = parseFloat(cssVar(rootS, "--gauge-stagger")) || 450;
+        var gStag = parseFloat(cssVar(rootS, "--gauge-stagger")), wait = isNaN(gStag) ? 450 : gStag;   /* 0 ist erlaubt (Handy): beide zaehlen zugleich */
         var fadeIn = morphing ? (parseFloat(cssVar(rootS, "--dur-morph")) || 460) * 0.8 : (parseFloat(cssVar(rootS, "--dur-fade")) || 300) * (1 + (parseFloat(cssVar(rootS, "--gauges-overlap")) || 0.6));   /* wie der Ring in CSS */
         var ringDur = parseFloat(cssVar(rootS, "--dur-gauge")) || 900;
         Array.prototype.forEach.call(story.querySelectorAll(".gauge__num"), function (el, gi) {
@@ -931,7 +967,7 @@
       /* Fortschritt im aktuellen Kapitel: Zelle fuellt sich, Text gleitet leicht. Nur transform und Hintergrund */
       var a0 = sCur > 0 ? AT[sCur - 1] : 0, a1 = sCur < AT.length ? AT[sCur] : 1;
       var cp = Math.min(1, Math.max(0, (p - a0) / Math.max(0.001, a1 - a0))).toFixed(3);   /* nur am aktiven Kapitel und Punkt: kein Stil-Neuberechnen der ganzen Szene je Frame */
-      if (activeCh) activeCh.style.setProperty("--chapter-p", cp);
+      if (activeCh && !touchUI) activeCh.style.setProperty("--chapter-p", cp);   /* Touch: der Text gleitet nicht, also keine Stilrechnung je Frame */
       if (activeDot) activeDot.style.setProperty("--chapter-p", cp);
       if (ghosts.length && r.bottom < pin.offsetHeight) ghosts.forEach(function (g) { if (g.anim) g.anim.finish(); });   /* Szene loest sich: Flug sofort beenden */
     };
@@ -988,7 +1024,7 @@
       if (desk && over() > 0) shrink(parseFloat(cssVar(rootS, "--balance-min")) * remPx || 176);   /* letzte Stufe fuer sehr niedrige Fenster */
     };
     var fitTimer;
-    window.addEventListener("resize", function () { clearTimeout(fitTimer); fitTimer = setTimeout(function () { fitScene(); pickStep(); }, 120); });
+    onResize(function () { clearTimeout(fitTimer); fitTimer = setTimeout(function () { fitScene(); pickStep(); }, 120); });
     (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fitScene);
     fitScene();
     pickStep();
@@ -1008,7 +1044,7 @@
        nichts mehr ueberlappt (Satz, andere Karten, Fensterrand). Passt es nicht, werden alle Karten etwas kleiner. */
     var fvis = fcards, files = [];
     var flayout = function () {
-      var vw = window.innerWidth, vh = window.innerHeight, narrow = vw < 700, tall = vh > vw * 1.2;   /* hoch: die Karten weichen nach oben und unten aus, dort ist Platz */
+      var vw = window.innerWidth, vh = viewH(), narrow = vw < 700, tall = vh > vw * 1.2;   /* hoch: die Karten weichen nach oben und unten aus, dort ist Platz */
       tbox = [ftext.offsetWidth / 2, ftext.offsetHeight / 2];
       fvis = fcards.filter(function (c) { return c.offsetParent !== null; });   /* schmal: sechs statt zehn Karten, dafuer groesser */
       var base = fvis.map(function (c) {
@@ -1054,6 +1090,25 @@
       }
       /* nach dem Verteilen alle Karten etwas kleiner: mehr Luft zueinander, die Plaetze bleiben */
       fpos = base.map(function (b, i) { return { w: b.w, h: b.h, ar: b.w / b.h, arTxt: null, rot: b.rot, bw: b.bw * best.k * 0.96, x: best.P[i].x, y: best.P[i].y, k: best.k * 0.96, col: 0, row: 0, rc: 1 }; });
+      /* Handy (Jamie 04.10.2026: "Bilder sauklein"): feste, grosse Plaetze statt Verteilen. Drei Bilder ueber dem Satz,
+         drei darunter, leicht ueberlappend wie hingeworfene Abzuege. Jede KI-Kennzeichnung oben links bleibt frei.
+         Werte: Mitte x und Breite als Anteil der Inhaltsbreite, Mitte y als Anteil der freien Hoehe ueber oder unter dem Satz */
+      var FSLOT = { bruecke: [-0.26, 0.28, 0.48, 0], leuchtturm: [0.28, 0.50, 0.40, 0], wald: [-0.01, 0.80, 0.28, 0],
+        hafen: [0.27, 0.30, 0.36, 1], wasserfall: [-0.24, 0.44, 0.40, 1], moor: [0.19, 0.76, 0.52, 1] };
+      if (narrow) {
+        var CW = vw - 2 * gut0, topA = -vh / 2 + head0 + FM * 2, topB = -tbox[1] - FM / 2, botA = tbox[1] + FM / 2, botB = vh / 2 - FM * 2;   /* 40 px Luft zu Navbar und Unterkante */
+        var Ht = Math.max(0, topB - topA), Hb = Math.max(0, botB - botA);
+        fvis.forEach(function (c, i) {
+          var nm = ((c.querySelector("img").getAttribute("src") || "").match(/ph-ki-foto-\d+-([a-z]+)/) || [0, ""])[1], sl = FSLOT[nm];
+          if (!sl) return;
+          var b = base[i], H = sl[3] ? Hb : Ht;
+          var w = Math.min(sl[2] * CW, H * 0.8 * b.w / b.h);   /* niedrige Fenster: nie hoeher als die freie Flaeche */
+          var kk = w / b.w;
+          fpos[i].k = kk; fpos[i].bw = b.bw * kk;
+          fpos[i].x = sl[0] * CW;
+          fpos[i].y = sl[3] ? botA + sl[1] * Hb : topA + sl[1] * Ht;
+        });
+      }
       fnarrow = narrow;
       /* Raster am Ende: so breit wie der Seiteninhalt, zwei Reihen. Im Hochformat drei Reihen mit groesseren Kacheln */
       var gut = parseFloat(getComputedStyle(ftext.querySelector(".flight__text")).paddingLeft) || FM;
@@ -1078,8 +1133,15 @@
       var gridH = (R - 1) * pitch + tile + labelH, G = G0, shift = (G + gridH + labelBlock) / 2;
       shift -= head / 2;
       fgrid = { cols: cols2, gap: gap, tile: tile, pitch: pitch, top: tbox[1] - shift + G, shift: shift };
-      fpos.forEach(function (q, i) { if (q.row === 0 && q.col === Math.floor((q.rc - 1) / 2)) ftop = i; });   /* oben auf den Stapel: das mittlere Bild der ersten Reihe */
-      fgrid.stackCY = -vh * 0.05;   /* Stapel auf der optischen Mitte des Bildes, bei 45 % der Hoehe */ fgrid.stackW = Math.min(tile * 1.6, gw * 0.6, (gridH + labelH) * 0.9);   /* der Stapel liegt mitten im Raster, etwas groesser als eine Kachel */
+      if (narrow) {
+        /* Handy: eine Reihe ueber dem Satz, eine darunter. Die Karten oben bleiben oben, keine kreuzt den Text, der Satz bleibt stehen */
+        tile = Math.min(tile, (gw - (cols2 - 1) * gap) / cols2);
+        fgrid.tile = tile; fgrid.shift = 0;
+        fgrid.rowY = [-tbox[1] - G0 - labelH - tile / 2, tbox[1] + G0 + tile / 2];
+      }
+      fpos.forEach(function (q, i) { if (q.row === 0 && q.col === (narrow ? q.rc - 1 : Math.floor((q.rc - 1) / 2))) ftop = i; });   /* oben auf den Stapel: das mittlere Bild der ersten Reihe. Handy: das rechte, so liegt beim Zusammenschieben jede Karte unter ihrer rechten Nachbarin und kein KI-Label wird verdeckt */
+      fpos.forEach(function (q) { q.srk = narrow ? (q.row === 0 ? q.rc - 2 - q.col : 2 + q.col + q.row * q.rc) : -1; });   /* Handy: Rang im Stapel nach Spalte, links liegt hinten */
+      fgrid.stackCY = narrow ? vh * 0.16 : -vh * 0.05;   /* Handy: tief im Bild, so folgt nach seinem Abgang gleich die Fuge zu Idee */   /* Stapel auf der optischen Mitte des Bildes, bei 45 % der Hoehe */ fgrid.stackW = narrow ? Math.min(gw * 0.72, vh * 0.42) : Math.min(tile * 1.6, gw * 0.6, (gridH + labelH) * 0.9);   /* der Stapel liegt mitten im Raster, etwas groesser als eine Kachel */
       fvis.forEach(function (c, i) {
         c.dataset.side = fpos[i].x < 0 ? "l" : "r";
         fpos[i].kiEl = c.querySelector(".flight__ki");
@@ -1095,14 +1157,14 @@
         if (im.dataset.kb) name += "\n600 px \u00b7 " + im.dataset.kb + " KB";   /* Kante und Gewicht zusammen: 37 KB gelten fuer 600 px, nicht fuer 1600 */
         var f = document.createElement("span");
         f.className = "flight__file"; f.setAttribute("aria-hidden", "true"); f.textContent = name;
-        var tx = (fpos[i].col - (fpos[i].rc - 1) / 2) * (tile + gap), ty = fgrid.top + tile + fpos[i].row * pitch + 6;
+        var tx = (fpos[i].col - (fpos[i].rc - 1) / 2) * (tile + gap), ty = (fgrid.rowY ? fgrid.rowY[fpos[i].row] + tile / 2 : fgrid.top + tile + fpos[i].row * pitch) + 6;
         f.style.transform = "translate(-50%, 0) translate(" + tx.toFixed(1) + "px, " + ty.toFixed(1) + "px)";
         f.style.maxWidth = (tile + gap) + "px";
         flight.querySelector(".flight__pin").appendChild(f); files.push(f);
       });
     };
     flayout();
-    window.addEventListener("resize", flayout);
+    onResize(flayout);
     if ("IntersectionObserver" in window) new IntersectionObserver(function (es) { es.forEach(function (e) { flight.classList.toggle("is-live", e.isIntersecting); }); }).observe(flight);   /* Hintergrund atmet nur in Sicht */
     else flight.classList.add("is-live");
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(flayout);
@@ -1115,25 +1177,27 @@
       /* Satz und Label ruecken mit dem Scroll in die Gruppe, bevor die Karten in die Zellen einbiegen */
       var gq = fgrid ? ease2(clamp01((p - 0.56) / 0.12)) : 0;   /* der Satz rueckt erst hoch, wenn die Karten halb angekommen sind */
       if (fgrid) ftext.style.transform = gq > 0 ? "translateY(" + (-fgrid.shift * gq).toFixed(1) + "px)" : "";
-      var spAll = ease2(clamp01((p0 - STACK_AT) / STACK_LEN));
-      var sayOut = fnarrow ? clamp01((p0 - STACK_AT + 0.05) / 0.05) : clamp01(spAll / 0.4);   /* schmal ist der Satz weg, bevor die erste Karte ihre Zelle verlaesst */
+      var SA = fnarrow ? 0.75 : STACK_AT, SL = fnarrow ? 0.2 : STACK_LEN;   /* Handy: das Raster steht eine Weile still (gelandet bei etwa 0,66), dann der Stapel bis 0,95 */   /* Handy: Raster steht laenger, der Stapel ist erst kurz vor dem Loesen fertig, danach keine leere Strecke */
+      var spAll = ease2(clamp01((p0 - SA) / SL));
+      var sayOut = fnarrow ? clamp01((p0 - SA) / 0.06) : clamp01(spAll / 0.4);   /* schmal ist der Satz weg, bevor die erste Karte ihre Zelle verlaesst */
       ftext.style.opacity = sayOut > 0 ? (1 - sayOut).toFixed(3) : "";   /* ganz weg, bevor der Stapel die Zeilen erreicht */   /* beim Stapeln tritt der Satz zurueck, der Stapel steht allein in der Mitte */
       fvis.forEach(function (card, i) {
         var C = fpos[i];
         var dir = C.x < 0 ? -1 : 1, out = dir * (vw / 2 + C.bw * 0.6);
-        var lag = (C.y < 0 ? 0.15 : 0) + (i % 3) * 0.04;
-        var arrive = clamp01((enter - 0.15 - lag) / 0.55), e = 1 - Math.pow(1 - arrive, 3);   /* kommt seitlich, bremst sanft */
+        var lag = (C.y < 0 ? 0.15 : 0) + (fnarrow ? 0 : (i % 3) * 0.04);   /* Handy: eine Reihe blendet gemeinsam ein, keine Doppelbelichtung */
+        var arrive = fnarrow ? clamp01((enter - 0.18 - lag) / 0.18) : clamp01((enter - 0.15 - lag) / 0.55), e = 1 - Math.pow(1 - arrive, 3);   /* kommt seitlich, bremst sanft. Handy: erst, wenn die Sektion gut im Bild ist */
+        if (fnarrow) out = C.x;   /* Handy: kein Einflug von ausserhalb, sonst stuende ein KI-Bild ohne sichtbares Label am Rand */
         var x = out + (C.x - out) * e, y = C.y * (0.85 + 0.15 * e), r = C.rot * (1 + (1 - e) * 1.5), s = C.k * (1 + 0.12 * (1 - e)), ar = C.ar;
-        var mid = (C.rc - 1) / 2, lagL = Math.abs(C.col - mid) * 0.03 + C.row * 0.02;   /* gestaffelt nach Spalte und Reihe: nie zwei Karten gleichzeitig auf derselben Bahn */
+        var mid = (C.rc - 1) / 2, lagL = fnarrow ? C.row * 0.02 : Math.abs(C.col - mid) * 0.03 + C.row * 0.02;   /* schmal: eine Reihe landet zusammen, die Namen erscheinen gemeinsam */   /* gestaffelt nach Spalte und Reihe: nie zwei Karten gleichzeitig auf derselben Bahn */
         var leave = clamp01((p - 0.3 - lagL) / 0.4);               /* innere Spalten zuerst; alle Karten landen sicher, bevor der Stapel beginnt */
         if (leave > 0) {
           var qa = clamp01(leave / 0.4), qb = clamp01((leave - 0.4) / 0.6);
           var col = C.col, row = C.row;
-          var tx = (col - mid) * (fgrid.tile + fgrid.gap), ty = fgrid.top + fgrid.tile / 2 + row * fgrid.pitch;
+          var tx = (col - mid) * (fgrid.tile + fgrid.gap), ty = fgrid.rowY ? fgrid.rowY[row] : fgrid.top + fgrid.tile / 2 + row * fgrid.pitch;
           var sT = fgrid.tile / C.w, ea = ease2(qa);
           s = C.k + (sT - C.k) * ea;                              /* an Ort und Stelle kleiner, gleitend */
           ar = C.ar + (1 - C.ar) * ea;                             /* und dabei zum Quadrat */
-          r = C.rot * (1 - Math.max(ea * 0.5, ease2(qb)));
+          r = C.rot * (1 - (fnarrow ? ea : Math.max(ea * 0.5, ease2(qb))));   /* Handy: gerade in die Zelle, weniger Kreuzen */
           /* Bahn neben dem Satz: erst seitlich hinaus, dann hinunter, dann in die Zelle */
           /* direkt in die Zelle, in einer leichten Kurve: waagrecht etwas frueher als senkrecht. Unter dem Satz hindurch, er liegt oben */
           /* in die Zelle in einer Kurve, die um den Satz herumfuehrt: kreuzt der gerade Weg ihn, liegt der Kontrollpunkt seitlich daneben */
@@ -1152,29 +1216,35 @@
         }
         card.style.transform = "translate(-50%, -50%) translate(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px) rotate(" + r.toFixed(2) + "deg) scale(" + s.toFixed(3) + ")";
         /* schmal ist neben dem Satz kein Platz: dort tauchen die kleinen Karten kurz unter dem Text weg und unten wieder auf */
-        card.style.opacity = "";   /* der Satz liegt ueber den Karten: wer kurz darunter durchgleitet, blinkt nicht */
+        card.style.opacity = fnarrow && e < 1 ? e.toFixed(3) : "";   /* Handy: blendet am Platz ein. Breit: der Satz liegt ueber den Karten, wer darunter durchgleitet, blinkt nicht */
         var arTxt = ar === C.ar ? "" : ar.toFixed(3);
         if (C.arTxt !== arTxt) { card.style.aspectRatio = arTxt; C.arTxt = arTxt; }   /* nur bei Aenderung; contain: layout haelt das Layout in der Karte */
         card.classList.toggle("is-small", leave > 0.4);
         var landed = leave >= 1;
         /* Stapel: aus der Zelle in die Mitte, jedes Bild leicht verdreht, das oberste gerade */
-        var spq = clamp01((p0 - STACK_AT - (i % 5) * 0.006) / STACK_LEN), sp = 1 - (1 - spq) * (1 - spq);   /* ease-out: die Bilder kommen langsam im Stapel an */
+        var spq = clamp01((p0 - SA - (i % 5) * 0.006) / SL), sp = fnarrow ? spq * spq * (3 - 2 * spq) : 1 - (1 - spq) * (1 - spq);   /* ease-out: die Bilder kommen langsam im Stapel an */
         if (sp > 0 && fgrid) {
           var top = i === ftop, jig = top ? 0 : 1;
           var sx = jig * (((i * 53) % 7) - 3) * 4, sy = fgrid.stackCY + jig * (((i * 29) % 5) - 2) * 4, sr = jig * (((i * 37) % 11) - 5) * 1.4;
-          x += (sx - x) * sp; y += (sy - y) * sp; r += (sr - r) * sp; s += (fgrid.stackW / C.w - s) * sp; ar += (1 - ar) * sp;
+          var srk = fnarrow ? C.srk : i < ftop ? i : i - 1;
+          if (fnarrow) { if (top) { sx = 16; sy = fgrid.stackCY + 44; } else if (srk < 2) { sx = srk ? -16 : 0; sy = fgrid.stackCY - (srk ? 44 : 0); sr = srk ? -4 : -2; } }   /* Handy: drei Abzuege symmetrisch um die Mitte, 44 px Stufe und nach links gedreht: die hinteren lugen oben links hervor, ihr KI-Label bleibt ganz frei */   /* Handy: zwei Abzuege lugen oben links hervor, ihr KI-Label bleibt frei */
+          var spY = fnarrow ? 1 - Math.pow(1 - clamp01(spq / 0.6), 2) : sp;   /* Handy: erst die Hoehe, dann seitlich: die Labels der hinteren Abzuege stehen frei, bevor sich eine Karte darueber schiebt */
+          x += (sx - x) * (fnarrow && top ? spY : sp); y += (sy - y) * spY; r += (sr - r) * sp; s += (fgrid.stackW / C.w - s) * spY;   /* Handy: Wachsen und Absinken gemeinsam, die Gruppe laeuft um die Mitte zusammen */
+          if (fnarrow) x = Math.max(-vw / 2 + 16 + C.w * s / 2, Math.min(vw / 2 - 16 - C.w * s / 2, x));   /* Handy: keine Karte ragt beim Zusammenschieben ueber den Rand */ ar += (1 - ar) * sp;
           card.style.opacity = "";
           var arS = ar === C.ar ? "" : ar.toFixed(3);
           if (C.arTxt !== arS) { card.style.aspectRatio = arS; C.arTxt = arS; }
         }
-        card.style.zIndex = i === ftop && sp > 0 ? "2" : "";
-        if (files[i]) files[i].classList.toggle("is-in", landed && sp === 0);   /* die Namen gehen, sobald sich die Bilder stapeln */
+        var srk2 = fnarrow ? C.srk : i < ftop ? i : i - 1;
+        card.style.zIndex = sp > 0 ? (i === ftop ? "10" : fnarrow ? String(srk2 < 2 ? 9 - srk2 : 2 + C.col) : "") : "";   /* Handy: rechts liegt immer oben, so deckt keine Karte das Label ihrer rechten Nachbarin */
+        if (files[i]) files[i].classList.toggle("is-in", landed && (fnarrow ? spAll === 0 : sp === 0));   /* Handy: alle Namen gehen gemeinsam */   /* die Namen gehen, sobald sich die Bilder stapeln */
         if (sp > 0) {
           card.style.transform = "translate(-50%, -50%) translate(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px) rotate(" + r.toFixed(2) + "deg) scale(" + s.toFixed(3) + ")";
         }
         var fit = Math.min(1, (C.w * s - 12) / (C.ki - 16));   /* "KI-generiert" bleibt immer ganz in der Karte: zu kleine Karten verkleinern den Hinweis ein wenig */
-        C.kiEl.style.transform = "scale(" + (fit / s).toFixed(3) + ")";   /* sonst bleibt das Label gleich gross, egal wie klein die Karte ist. Direkt am Element */
-        var rank = i < ftop ? i : i - 1, thr = fnarrow ? (rank === 0 ? 0.75 : 0.1 + rank * 0.03) : 0.35 + rank * 0.06;   /* breit bis kurz vor dem fertigen Stapel: man sieht, wie aus zehn eins wird */
+        var kiT = "scale(" + (fit / s).toFixed(3) + ")";
+        if (C.kiT !== kiT) { C.kiEl.style.transform = kiT; C.kiT = kiT; }   /* sonst bleibt das Label gleich gross, egal wie klein die Karte ist. Direkt am Element */
+        var rank = fnarrow ? C.srk : i < ftop ? i : i - 1, thr = fnarrow ? (rank < 2 ? 2 : 0.12) : 0.35 + rank * 0.06;   /* breit bis kurz vor dem fertigen Stapel: man sieht, wie aus zehn eins wird */
         card.classList.toggle("is-under", i !== ftop && sp > thr);   /* einzeln, bevor sich die Karten ueber die Labels schieben; schmal bleibt neben dem obersten hoechstens eins */
       });
     };
@@ -1182,7 +1252,7 @@
       /* ruhig: das fertige Raster mit Antwortsatz und Dateigroessen, bevor der Stapel beginnt (p 0,839, jede Karte gelandet) */
       var FREST = STACK_AT - 0.001;
       place(FREST, 1);
-      window.addEventListener("resize", function () { place(FREST, 1); });
+      onResize(function () { place(FREST, 1); });
     } else {
       /* Weich nachgefuehrt: der Flug folgt dem Scroll mit kurzer Traegheit (rund 120 ms), damit Mausrad-Klicks
          gleiten statt springen. Retargetet in jedem Frame, also jederzeit umkehrbar */
@@ -1198,10 +1268,11 @@
       };
       var update = function (snap) {
         ticking = false;
-        var rect = flight.getBoundingClientRect(), vh = window.innerHeight;
+        var rect = flight.getBoundingClientRect(), vh = viewH();
         var span = rect.height - vh;
         tgt = [clamp01(-rect.top / (span > 0 ? span : 1)), clamp01((vh - rect.top) / vh)];
         if (document.documentElement.classList.contains("handoff-on") && -rect.top > span - (parseFloat(getComputedStyle(flight).paddingBottom) || 0)) snap = true;   /* Pin geloest: keine Nachfuehrung mehr, der Stapel steht, die Uebergabe uebernimmt */
+        if (touchUI) snap = true;                                 /* Touch scrollt schon weich: Nachfuehrung wuerde nur hinterherschwimmen */
         if (snap === true || !cur) { cancelAnimationFrame(glide); glide = 0; lastT = 0; cur = tgt.slice(); place(cur[0], cur[1]); }
         else if (!glide) glide = requestAnimationFrame(follow);
       };
@@ -1218,7 +1289,7 @@
       } else {
         window.addEventListener("scroll", onScroll, { passive: true });
       }
-      window.addEventListener("resize", function () { update(true); });
+      onResize(function () { update(true); });
       update(true);
 
       /* Uebergabe an Idee: loest sich die Szene, fliegt das oberste Bild des Stapels als Kopie nach rechts und waechst
@@ -1237,7 +1308,7 @@
         var hoPad = 0, hoSpt = 0, hoMeasure = function () { hoPad = parseFloat(getComputedStyle(flight).paddingBottom) || 0; hoSpt = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0; };
         hoMeasure();
         var target = function () {
-          var vh = window.innerHeight, fr = flight.getBoundingClientRect(), sr = hoStage.getBoundingClientRect(), ir = idee.getBoundingClientRect();
+          var vh = viewH(), fr = flight.getBoundingClientRect(), sr = hoStage.getBoundingClientRect(), ir = idee.getBoundingClientRect();
           var pad = hoPad;
           var past = -fr.top - Math.max(1, fr.height - pad - vh);   /* Pixel seit der Pin sich loest, ohne das Polster der Fuge */
           var land = hoSpt + (sr.top - ir.top);
@@ -1256,7 +1327,7 @@
           if (wasBorn && !born) { unbornAt = performance.now(); leaving = true; setTimeout(function () { if (!hGlide) hGlide = requestAnimationFrame(hoFollow); }, LEAVE_MS); }
           hoStage.classList.toggle("is-born", born || !t.beside);
           flight.classList.toggle("is-handoff", h > 0);
-          var away = t.beside ? clamp01(h / 0.12) : clamp01(t.past / (t.vh * 0.25));   /* schmal ohne Flug: der Stapel geht, bevor er unter den Kopf rutscht */
+          var away = t.beside ? clamp01(h / 0.12) : fnarrow && fgrid ? clamp01((t.past - (t.vh / 2 + fgrid.stackCY - fgrid.stackW / 2 - 60 - (header ? header.offsetHeight : 0))) / (t.vh * 0.06)) : clamp01(t.past / (t.vh * 0.25));   /* mittel ohne Flug: der Stapel geht, bevor er unter den Kopf rutscht. Handy: er scrollt voll sichtbar mit und geht erst kurz, wenn die oberen KI-Labels (72 px ueber dem Stapel) die Navbar erreichen */
           if (cardsBox) cardsBox.style.opacity = away > 0 ? (1 - away).toFixed(3) : "";   /* der Stapel geht als Ganzes, ohne Durchsicht zwischen den Fotos */
           fvis.forEach(function (c, i) { c.classList.toggle("is-top", i === ftop); });
           var C = fpos[ftop], top = fvis[ftop];
@@ -1296,13 +1367,13 @@
         };
         var hoOn = false;
         var hoIO = new IntersectionObserver(function () {
-          var fr = flight.getBoundingClientRect(), ir = idee.getBoundingClientRect(), vh = window.innerHeight;
+          var fr = flight.getBoundingClientRect(), ir = idee.getBoundingClientRect(), vh = viewH();
           var near = fr.bottom > -vh && ir.top < vh * 2;
           if (near && !hoOn) { hoOn = true; window.addEventListener("scroll", onHo, { passive: true }); onHo(); }
           else if (!near && hoOn) { hoOn = false; window.removeEventListener("scroll", onHo); }
         }, { rootMargin: "100% 0px" });
         hoIO.observe(flight); hoIO.observe(idee);
-        window.addEventListener("resize", function () { hoMeasure(); hc = target().h; render(target()); });
+        onResize(function () { hoMeasure(); hc = target().h; render(target()); });
         hc = target().h; render(target());
       }
     }
@@ -1351,7 +1422,7 @@
     });
     faq.classList.add("is-ready");
     fqAria(); fqPlace();
-    if (window.ResizeObserver) new ResizeObserver(fqPlace).observe(faq); else window.addEventListener("resize", fqPlace);
+    if (window.ResizeObserver) new ResizeObserver(fqPlace).observe(faq); else onResize(fqPlace);
 
     var fqToggle = function (T) {
       cancelAnimationFrame(fqRaf);   /* laeuft noch eine Bewegung: aus dem Ist-Zustand weiter, kein Sprung */
@@ -1443,7 +1514,7 @@
     var touched = false;
     range.addEventListener("input", function () { touched = true; setPos(); });
     remeasure();
-    if (window.ResizeObserver) new ResizeObserver(remeasure).observe(compare); else window.addEventListener("resize", remeasure);
+    if (window.ResizeObserver) new ResizeObserver(remeasure).observe(compare); else onResize(remeasure);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(remeasure);
     /* Pfeiltasten in 5er-Schritten, mit Umschalt in 1er-Schritten */
     range.addEventListener("keydown", function (ev) {
@@ -1490,13 +1561,13 @@
     /* Nach dem Auftritt zieht der Schieber einmal ueber das Bild, mit Halt an beiden Seiten. Die Endpunkte liegen
        kurz vor den Etiketten, damit jede Seite mit Namen zu sehen ist. Jede Beruehrung oder Taste beendet das sofort */
     /* Aufrichten am Scroll: --tilt 1 solange das Bild unten am Rand steht, 0 sobald seine Mitte bei 55 % der Hoehe ist. Weich nachgefuehrt */
-    if (!reduce) {
+    if (!reduce && !touchUI) {   /* Touch: kein Kippen, also auch kein Scroll-Listener und keine 3D-Ebene unter den Glas-Etiketten */
       document.documentElement.classList.add("tilt-on");
       var tCur = 1, tTgt = 1, tRaf = 0, tLast = 0;
       var shade = compare.parentNode.querySelector(".compare__shade");
       var shadeSize = function () { if (shade) { shade.style.width = compare.offsetWidth + "px"; shade.style.marginLeft = (-compare.offsetWidth / 2) + "px"; } };
       shadeSize();
-      if (window.ResizeObserver) new ResizeObserver(shadeSize).observe(compare); else window.addEventListener("resize", shadeSize);
+      if (window.ResizeObserver) new ResizeObserver(shadeSize).observe(compare); else onResize(shadeSize);
       var T_DEG = parseFloat(cssVar(root, "--compare-tilt")) || 28, T_SC = parseFloat(cssVar(root, "--compare-tilt-scale")) || 0.14;
       var T_PERSP = remPx("--compare-persp", 1120), T_DROP = remPx("--space-6", 64);
       /* transform direkt am Element, keine vererbte Variable: der Teilbaum wird nicht neu berechnet */
@@ -1506,14 +1577,15 @@
         if (shade) { shade.style.transform = tf; shade.style.opacity = (1 - k).toFixed(3); }
       };
       var tTarget = function () {
-        var fr = compare.parentNode.getBoundingClientRect(), vh = window.innerHeight;   /* die Figur kippt nicht: ungekippte Masse, keine Rueckkopplung */
+        if (touchUI) return 0;   /* Touch: das Bild steht flach, kein Kippen am Finger */
+        var fr = compare.parentNode.getBoundingClientRect(), vh = viewH();   /* die Figur kippt nicht: ungekippte Masse, keine Rueckkopplung */
         var top = fr.top + compare.offsetTop, h = compare.offsetHeight;
         var q = Math.min(((top + h / 2) - vh * 0.65) / (vh * 0.4), ((top + h) - (vh - T_DROP / 2)) / (vh * 0.4));   /* flach, wenn die Mitte bei 65 % steht oder das Bild ganz zu sehen ist */   /* flach, sobald das Bild ganz im Bild ist: Aufrichten beim Hereinkommen, kein Zustand beim Lesen */
         return Math.max(0, Math.min(1, q));
       };
       var tStep = function (now) {
         tRaf = 0;
-        var k = 1 - Math.exp(-Math.min(64, tLast ? now - tLast : 16) / 120);
+        var k = touchUI ? 1 : 1 - Math.exp(-Math.min(64, tLast ? now - tLast : 16) / 120);   /* Touch: kein Nachgleiten, der Finger scrollt schon weich */
         tLast = now;
         tCur += (tTgt - tCur) * k;
         if (Math.abs(tTgt - tCur) < 0.002) { tCur = tTgt; tLast = 0; } else tRaf = requestAnimationFrame(tStep);
