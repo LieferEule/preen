@@ -33,7 +33,7 @@ use objc2_av_foundation::{
     AVVideoScalingModeResize, AVVideoTransferFunctionKey, AVVideoTransferFunction_ITU_R_709_2,
     AVVideoWidthKey, AVVideoYCbCrMatrixKey, AVVideoYCbCrMatrix_ITU_R_709_2,
 };
-use objc2_core_foundation::CFString;
+use objc2_core_foundation::{CFString, CGSize};
 use objc2_core_graphics::CGImage;
 use objc2_core_media::{kCMTimeZero, CMTime};
 use objc2_core_video::{
@@ -218,6 +218,12 @@ pub struct Frames {
 
 impl Frames {
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::open_capped(path, None)
+    }
+
+    /// Frames no larger than `max_edge` on their longer side — for previews,
+    /// where decoding a 4K frame at full size would only be thrown away.
+    pub fn open_capped(path: &Path, max_edge: Option<u32>) -> Result<Self, String> {
         let asset = open(path)?;
         video_track(&asset)?;
         let generator = unsafe { AVAssetImageGenerator::assetImageGeneratorWithAsset(&asset) };
@@ -225,6 +231,10 @@ impl Frames {
             generator.setAppliesPreferredTrackTransform(true);
             generator.setRequestedTimeToleranceBefore(kCMTimeZero);
             generator.setRequestedTimeToleranceAfter(kCMTimeZero);
+            if let Some(edge) = max_edge {
+                let edge = edge as f64;
+                generator.setMaximumSize(CGSize::new(edge, edge));
+            }
         }
         Ok(Self { generator })
     }

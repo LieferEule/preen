@@ -33,6 +33,10 @@ struct ImageInfo {
     width: u32,
     height: u32,
     bytes: u64,
+    /// "image" or "video". A run is one or the other.
+    kind: &'static str,
+    /// Videos only.
+    duration_seconds: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -76,12 +80,22 @@ struct Progress {
 ///
 /// A dropped folder stands for the images directly inside it — the same
 /// expansion a run does, so what the panel lists is what gets processed.
+///
+/// A run is images or videos, never both: they come out as different files
+/// with different limits. The first file that is accepted decides, and files
+/// of the other kind are turned down with a reason instead of vanishing.
+/// `loaded_kind` is what the panel already holds, if anything.
 #[tauri::command]
-async fn inspect_images(paths: Vec<String>) -> InspectResult {
+async fn inspect_images(paths: Vec<String>, loaded_kind: Option<String>) -> InspectResult {
     tauri::async_runtime::spawn_blocking(move || {
         let mut result = InspectResult {
             images: vec![],
             rejected: vec![],
+        };
+        let mut kind: Option<&'static str> = match loaded_kind.as_deref() {
+            Some("image") => Some("image"),
+            Some("video") => Some("video"),
+            _ => None,
         };
         let expanded =
             pipeline::expand_inputs(&paths.iter().map(PathBuf::from).collect::<Vec<_>>());
@@ -94,23 +108,41 @@ async fn inspect_images(paths: Vec<String>) -> InspectResult {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.clone());
+            let this_kind = if video::is_supported(p) {
+                "video"
+            } else {
+                "image"
+            };
             let checked = if p.is_dir() {
                 Err("Ordner ohne Bilder".to_string())
             } else if !p.is_file() {
                 Err("keine Datei".to_string())
-            } else if !pipeline::is_supported(p) {
+            } else if !pipeline::is_supported(p) && !video::is_supported(p) {
                 Err("Format nicht unterstützt".to_string())
+            } else if kind.is_some_and(|k| k != this_kind) {
+                Err(if this_kind == "video" {
+                    "erst die Bilder fertig machen".to_string()
+                } else {
+                    "erst die Videos fertig machen".to_string()
+                })
+            } else if this_kind == "video" {
+                avfoundation::probe(p).map(|v| (v.width, v.height, Some(v.duration_seconds)))
             } else {
-                imageio::dimensions(p)
+                imageio::dimensions(p).map(|(w, h)| (w, h, None))
             };
             match checked {
-                Ok((width, height)) => result.images.push(ImageInfo {
-                    bytes: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
-                    path,
-                    name,
-                    width,
-                    height,
-                }),
+                Ok((width, height, duration_seconds)) => {
+                    kind = Some(this_kind);
+                    result.images.push(ImageInfo {
+                        bytes: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+                        path,
+                        name,
+                        width,
+                        height,
+                        kind: this_kind,
+                        duration_seconds,
+                    })
+                }
                 Err(reason) => result.rejected.push(Rejected { path, name, reason }),
             }
         }
@@ -213,6 +245,49 @@ fn output_limits(long_edge: u32, max_megapixels: f64) -> sizes::Limits {
     }
 }
 
+/// What a video run is allowed to produce, as the panel sends it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoLimits {
+    long_edge: u32,
+    /// Size target, 1 KB = 1000 bytes.
+    max_kb: u64,
+    /// Limit for the poster WebP.
+    poster_kb: Option<u64>,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+#[tauri::command]
+async fn process_videos(
+    app: AppHandle,
+    paths: Vec<String>,
+    slug: String,
+    custom_output_dir: Option<String>,
+    limits: VideoLimits,
+) -> Result<video::VideoBatchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let videos: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let settings = video::VideoSettings {
+            long_edge: limits.long_edge,
+            max_bytes: limits.max_kb * 1000,
+            overwrite: limits.overwrite,
+            poster_max_bytes: limits.poster_kb.map(|kb| kb * 1000),
+        };
+        video::convert(
+            &videos,
+            &slug,
+            custom_output_dir.as_deref().map(Path::new),
+            &settings,
+            |done, total| {
+                let _ = app.emit("preen://progress", Progress { done, total });
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn process_images(
     app: AppHandle,
@@ -242,7 +317,14 @@ async fn process_images(
 #[tauri::command]
 async fn thumbnail(path: String, size: u32) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let bitmap = imageio::decode_thumbnail(Path::new(&path), size.max(16) * 2)?;
+        let path = Path::new(&path);
+        let bitmap = if video::is_supported(path) {
+            // The first frame — the picture the result will start on.
+            let frames = avfoundation::Frames::open_capped(path, Some(size.max(16) * 2))?;
+            imageio::bitmap_from_image(&*frames.at(0.0)?)?
+        } else {
+            imageio::decode_thumbnail(path, size.max(16) * 2)?
+        };
         let encoded = pipeline::encode_within_limit(
             bitmap.pixels,
             bitmap.width,
@@ -365,11 +447,14 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// Image paths among the process arguments.
+/// Image and video paths among the process arguments.
 fn image_arguments(args: &[String]) -> Vec<String> {
     args.iter()
         .skip(1)
-        .filter(|a| !a.starts_with('-') && pipeline::is_supported(Path::new(a)))
+        .filter(|a| {
+            !a.starts_with('-')
+                && (pipeline::is_supported(Path::new(a)) || video::is_supported(Path::new(a)))
+        })
         .cloned()
         .collect()
 }
@@ -432,6 +517,7 @@ pub fn run() {
             suggest_name,
             preview_output,
             process_images,
+            process_videos,
             thumbnail,
             app_settings,
             shortcut_label,

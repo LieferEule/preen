@@ -87,7 +87,7 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
 /// Draws a CGImage into 8-bit sRGB RGBA, alpha premultiplied — the colour
 /// management step every decoded picture goes through, images and video
 /// frames alike.
-pub(crate) fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
+pub fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
     let width = CGImage::width(Some(image));
     let height = CGImage::height(Some(image));
     let channel = !matches!(

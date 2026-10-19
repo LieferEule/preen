@@ -27,6 +27,7 @@ import {
   onSettingsChanged,
   previewOutput,
   processImages,
+  processVideos,
   rememberTarget,
   resizePanel,
   debugLog,
@@ -37,6 +38,8 @@ import {
   thumbnail,
   type BatchResult,
   type ImageResult,
+  type VideoBatchResult,
+  type VideoResult,
   type Rejected,
   type ImageInfo,
   type Target,
@@ -45,9 +48,12 @@ import {
   EDGE_RANGE,
   PRESETS,
   SIZE_RANGE,
+  VIDEO_EDGE_RANGE,
+  VIDEO_SIZE_RANGE,
   kb,
   mp,
   presetByName,
+  seconds,
   type Preset,
 } from "../lib/presets";
 import { Popover } from "../components/Popover";
@@ -98,6 +104,7 @@ type Phase =
   | { kind: "loaded" }
   | { kind: "processing"; done: number; total: number }
   | { kind: "done"; result: BatchResult; maxKb: number | null; sourceBytes: number }
+  | { kind: "doneVideo"; result: VideoBatchResult; sourceBytes: number }
   | { kind: "failed"; message: string };
 
 /** Size limits for this run: the preset, with per-run overrides. */
@@ -118,6 +125,10 @@ export default function Panel() {
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [longEdge, setLongEdge] = useState(PRESETS[0].longEdge);
   const [maxKb, setMaxKb] = useState(PRESETS[0].maxKb);
+  // Videos have their own pair: a 2 MB clip and a 500 KB picture share a
+  // preset name, not a scale.
+  const [videoEdge, setVideoEdge] = useState(PRESETS[0].video.longEdge);
+  const [videoKb, setVideoKb] = useState(PRESETS[0].video.maxKb);
   // Destructive, so it never carries over: off again for every new drop.
   const [overwrite, setOverwrite] = useState(false);
   const [target, setTarget] = useState<Target>(TARGET_SOURCE);
@@ -146,17 +157,30 @@ export default function Panel() {
   const busyRef = useRef(false);
   busyRef.current = busy;
 
-  const limits: Limits = {
-    longEdge,
-    // Pixel cap and emergency floor belong to the preset; the fine controls
-    // do not touch them.
-    maxMegapixels: preset.maxMegapixels,
-    minLongEdge: preset.minLongEdge,
-    maxKb,
-    overwrite,
-    overridden: longEdge !== preset.longEdge || maxKb !== preset.maxKb || overwrite,
-  };
+  const isVideo = images[0]?.kind === "video";
+  const limits: Limits = isVideo
+    ? {
+        longEdge: videoEdge,
+        maxMegapixels: 0,
+        minLongEdge: 0,
+        maxKb: videoKb,
+        overwrite,
+        overridden:
+          videoEdge !== preset.video.longEdge || videoKb !== preset.video.maxKb || overwrite,
+      }
+    : {
+        longEdge,
+        // Pixel cap and emergency floor belong to the preset; the fine
+        // controls do not touch them.
+        maxMegapixels: preset.maxMegapixels,
+        minLongEdge: preset.minLongEdge,
+        maxKb,
+        overwrite,
+        overridden: longEdge !== preset.longEdge || maxKb !== preset.maxKb || overwrite,
+      };
   const loaded = images.length > 0;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
 
   // ---- settings ----------------------------------------------------------
   useEffect(() => {
@@ -166,6 +190,8 @@ export default function Panel() {
       setPreset(p);
       setLongEdge(p.longEdge);
       setMaxKb(p.maxKb);
+      setVideoEdge(p.video.longEdge);
+      setVideoKb(p.video.maxKb);
       setRecent(stored.recentTargets);
       setAutoHideSeconds(stored.autoHideSeconds);
       // A saved folder that has gone missing must not break a run.
@@ -185,7 +211,10 @@ export default function Panel() {
   // ---- files -------------------------------------------------------------
   const addPaths = useCallback(async (paths: string[]) => {
     if (busyRef.current || paths.length === 0) return;
-    const { images: found, rejected: turnedDown } = await inspectImages(paths);
+    const { images: found, rejected: turnedDown } = await inspectImages(
+      paths,
+      imagesRef.current[0]?.kind ?? null,
+    );
     setRejected(turnedDown);
     // Auch wenn nichts übrig bleibt: die Ruhe-Ansicht sagt dann, was weg ist.
     if (found.length === 0) return;
@@ -354,6 +383,8 @@ export default function Panel() {
     setPreset(p);
     setLongEdge(p.longEdge);
     setMaxKb(p.maxKb);
+    setVideoEdge(p.video.longEdge);
+    setVideoKb(p.video.maxKb);
     savePreset(p.name);
   };
 
@@ -365,6 +396,32 @@ export default function Panel() {
     setPhase({ kind: "processing", done: 0, total: images.length });
     try {
       const custom = await resolveTarget();
+      const sourceBytes = images.reduce((sum, i) => sum + (i.bytes ?? 0), 0);
+      if (isVideo) {
+        const result = await processVideos({
+          paths: images.map((i) => i.path),
+          slug,
+          customOutputDir: custom,
+          limits: {
+            longEdge: limits.longEdge,
+            maxKb: limits.maxKb,
+            // The poster weighs what a picture of the same preset may.
+            posterKb: preset.maxKb,
+            overwrite: limits.overwrite,
+          },
+        });
+        if (!result.videos.some((v) => v.output)) {
+          const first = result.videos.find((v) => v.error)?.error ?? "Nichts verarbeitet";
+          setPhase({
+            kind: "failed",
+            message:
+              result.videos.length > 1 ? `Keines der ${result.videos.length} Videos: ${first}` : first,
+          });
+          return;
+        }
+        setPhase({ kind: "doneVideo", result, sourceBytes });
+        return;
+      }
       const result = await processImages({
         paths: images.map((i) => i.path),
         slug,
@@ -377,7 +434,6 @@ export default function Panel() {
           overwrite: limits.overwrite,
         },
       });
-      const sourceBytes = images.reduce((sum, i) => sum + (i.bytes ?? 0), 0);
       // Ohne eine einzige fertige Datei gibt es nichts zu zeigen: dann ist
       // der Lauf fehlgeschlagen und nicht "fertig".
       if (!result.images.some((i) => i.output)) {
@@ -404,6 +460,8 @@ export default function Panel() {
     setSlug("");
     setLongEdge(preset.longEdge);
     setMaxKb(preset.maxKb);
+    setVideoEdge(preset.video.longEdge);
+    setVideoKb(preset.video.maxKb);
     setOverwrite(false);
     setPopover(null);
     grewOnce.current = false;
@@ -417,8 +475,10 @@ export default function Panel() {
     phase.kind === "idle"
       ? HEIGHTS.idle
       : phase.kind === "done"
-        ? doneHeight(phase.result)
-        : images.length > 1
+        ? doneHeight(phase.result.images)
+        : phase.kind === "doneVideo"
+          ? doneHeight(phase.result.videos)
+          : images.length > 1
           ? HEIGHTS.many
           : HEIGHTS.one;
 
@@ -443,14 +503,18 @@ export default function Panel() {
         const actual = inner ? inner.offsetHeight : HEIGHTS.idle;
         if (actual !== panelHeight) {
           const message = `HÖHE STIMMT NICHT · Zustand "${phase.kind}"${
-            isLoaded ? ` (${images.length} Bild${images.length === 1 ? "" : "er"})` : ""
+            isLoaded
+              ? ` (${images.length} ${isVideo ? "Video" : "Bild"}${
+                  images.length === 1 ? "" : isVideo ? "s" : "er"
+                })`
+              : ""
           } · soll ${panelHeight} px · ist ${actual} px`;
           console.error(`[preen] ${message}`);
           debugLog(message);
         }
       }, 600);
     }
-  }, [panelHeight, phase.kind, images.length]);
+  }, [panelHeight, phase.kind, images.length, isVideo]);
 
   // Debug builds only: the panel cannot be operated from a script — there is
   // no drag from Finder, and Return only fires while the name field has DOM
@@ -568,7 +632,7 @@ export default function Panel() {
             </p>
           ) : (
             <p className="text-[12px] font-medium tracking-[0.01em] text-[#40635f]">
-              {dragging ? "Loslassen" : "Bild hierher ziehen"}
+              {dragging ? "Loslassen" : "Bild oder Video ablegen"}
             </p>
           )}
         </div>
@@ -578,6 +642,13 @@ export default function Panel() {
             <Done
               result={phase.result}
               maxKb={phase.maxKb}
+              sourceBytes={phase.sourceBytes}
+              preview={preview}
+              onStartOver={startOver}
+            />
+          ) : phase.kind === "doneVideo" ? (
+            <DoneVideo
+              result={phase.result}
               sourceBytes={phase.sourceBytes}
               preview={preview}
               onStartOver={startOver}
@@ -654,9 +725,15 @@ export default function Panel() {
                 ) : (
                 <p className="truncate pl-1 text-[11px] text-[var(--color-ink-2)] tabular-nums">
                   <Swap
-                    text={`lange Kante ${limits.longEdge} px · ${mp(limits.maxMegapixels)} · höchstens ${limits.maxKb} KB${
-                      images.length > 1 ? " je Bild" : ""
-                    }${limits.overridden ? " (angepasst)" : ""}`}
+                    text={
+                      isVideo
+                        ? `bis ${limits.longEdge} px · 30 fps · Ziel ${kb(limits.maxKb * 1000)}${
+                            images.length > 1 ? " je Video" : ""
+                          } · ohne Ton${limits.overridden ? " (angepasst)" : ""}`
+                        : `lange Kante ${limits.longEdge} px · ${mp(limits.maxMegapixels)} · höchstens ${limits.maxKb} KB${
+                            images.length > 1 ? " je Bild" : ""
+                          }${limits.overridden ? " (angepasst)" : ""}`
+                    }
                     className="inline-block"
                   />
                 </p>
@@ -690,7 +767,8 @@ export default function Panel() {
                     className="min-w-0 flex-1 bg-transparent text-[13px] font-medium outline-none placeholder:font-normal placeholder:text-[var(--color-ink-3)]"
                   />
                   <span className="shrink-0 text-[13px] font-medium text-[var(--color-ink-3)]">
-                    {images.length > 1 ? `-1 … -${images.length}.webp` : ".webp"}
+                    {(images.length > 1 ? `-1 … -${images.length}` : "") +
+                      (isVideo ? ".mp4" : ".webp")}
                   </span>
                 </div>
               </div>
@@ -768,20 +846,42 @@ export default function Panel() {
 
                 <Popover open={popover === "fine"} width={252} align="right" label="Feineinstellung">
                   <div className="space-y-3 p-3">
-                    <Slider
-                      label="Lange Kante"
-                      unit="px"
-                      {...EDGE_RANGE}
-                      value={limits.longEdge}
-                      onChange={setLongEdge}
-                    />
-                    <Slider
-                      label="Obergrenze"
-                      unit="KB"
-                      {...SIZE_RANGE}
-                      value={limits.maxKb}
-                      onChange={setMaxKb}
-                    />
+                    {isVideo ? (
+                      <>
+                        <Slider
+                          label="Lange Kante bis"
+                          unit="px"
+                          {...VIDEO_EDGE_RANGE}
+                          value={limits.longEdge}
+                          onChange={setVideoEdge}
+                        />
+                        <Slider
+                          label="Zielgröße"
+                          unit=""
+                          {...VIDEO_SIZE_RANGE}
+                          value={limits.maxKb}
+                          format={(v) => kb(v * 1000)}
+                          onChange={setVideoKb}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Slider
+                          label="Lange Kante"
+                          unit="px"
+                          {...EDGE_RANGE}
+                          value={limits.longEdge}
+                          onChange={setLongEdge}
+                        />
+                        <Slider
+                          label="Obergrenze"
+                          unit="KB"
+                          {...SIZE_RANGE}
+                          value={limits.maxKb}
+                          onChange={setMaxKb}
+                        />
+                      </>
+                    )}
                     <label className="flex cursor-pointer items-center justify-between gap-2">
                       <span className="text-[12px] font-medium text-[var(--color-ink-2)]">
                         Bestehende Dateien ersetzen
@@ -798,6 +898,8 @@ export default function Panel() {
                       onClick={() => {
                         setLongEdge(preset.longEdge);
                         setMaxKb(preset.maxKb);
+                        setVideoEdge(preset.video.longEdge);
+                        setVideoKb(preset.video.maxKb);
                         setOverwrite(false);
                       }}
                       className="pressable w-full text-left text-[12px] font-semibold text-[var(--color-accent)]"
@@ -823,7 +925,7 @@ export default function Panel() {
                   {busy
                     ? `Verarbeite… ${phase.done} / ${phase.total}`
                     : images.length > 1
-                      ? `${images.length} Bilder verarbeiten`
+                      ? `${images.length} ${isVideo ? "Videos" : "Bilder"} verarbeiten`
                       : "Verarbeiten"}
                 </span>
               </button>
@@ -860,24 +962,27 @@ function Header(props: {
   const { images, preview } = props;
   const many = images.length > 1;
   const first = images[0];
+  const video = first.kind === "video";
   const totalBytes = images.reduce((sum, i) => sum + (i.bytes ?? 0), 0);
   return (
     <div className="flex items-center gap-3">
       <Thumb src={preview} />
       <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <p className="truncate text-[13px] font-semibold">
-          {many ? `${images.length} Bilder` : first.name}
+          {many ? `${images.length} ${video ? "Videos" : "Bilder"}` : first.name}
         </p>
         <p className="text-[11px] text-[var(--color-ink-2)] tabular-nums">
           {many
             ? `zusammen ${kb(totalBytes)}`
-            : `${first.width} × ${first.height} px · ${kb(first.bytes ?? 0)}`}
+            : `${first.width} × ${first.height} px · ${
+                video && first.durationSeconds ? `${seconds(first.durationSeconds)} · ` : ""
+              }${kb(first.bytes ?? 0)}`}
         </p>
       </div>
       <button
         onClick={props.onRemove}
         disabled={props.disabled}
-        aria-label="Bilder entfernen"
+        aria-label={video ? "Videos entfernen" : "Bilder entfernen"}
         className="pressable grid size-7 shrink-0 place-items-center rounded-full text-[14px] leading-none text-[#40635f]"
         style={{ background: "rgba(15,44,43,0.08)" }}
       >
@@ -919,8 +1024,8 @@ const rejectionTitle = (rejected: Rejected[]) =>
  * but the names still stand on the second line: a collected line whose
  * content only lives in a tooltip is a hiding place.
  */
-function failureLines(failed: ImageResult[]): string[] {
-  const entry = (f: ImageResult) => `${sourceName(f.source)} — ${f.error}`;
+function failureLines(failed: (ImageResult | VideoResult)[]): string[] {
+  const entry = (f: ImageResult | VideoResult) => `${sourceName(f.source)} — ${f.error}`;
   if (failed.length <= 2) return failed.map(entry);
   const reasons = [...new Set(failed.map((f) => f.error))];
   const head =
@@ -931,8 +1036,8 @@ function failureLines(failed: ImageResult[]): string[] {
 }
 
 /** Failures need a second line as soon as there are two of them. */
-function doneHeight(result: BatchResult): number {
-  return result.images.filter((i) => i.error).length >= 2 ? HEIGHTS.doneErrors : HEIGHTS.done;
+function doneHeight(items: { error: string | null }[]): number {
+  return items.filter((i) => i.error).length >= 2 ? HEIGHTS.doneErrors : HEIGHTS.done;
 }
 
 function Thumb({
@@ -1045,6 +1150,8 @@ function Slider(props: {
   max: number;
   step: number;
   value: number;
+  /** Instead of "value unit" — for sizes that read better as MB. */
+  format?: (value: number) => string;
   onChange: (value: number) => void;
 }) {
   const filled = ((props.value - props.min) / (props.max - props.min)) * 100;
@@ -1053,7 +1160,7 @@ function Slider(props: {
       <div className="flex items-baseline justify-between pb-1">
         <span className="text-[12px] text-[var(--color-ink-2)]">{props.label}</span>
         <span className="text-[12px] font-semibold tabular-nums">
-          {props.value} {props.unit}
+          {props.format ? props.format(props.value) : `${props.value} ${props.unit}`}
         </span>
       </div>
       <input
@@ -1217,6 +1324,164 @@ function Done(props: {
                   ? `Grenze ${maxKb} KB`
                   : "ohne Grenze"}
             </span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => first && revealItemInDir(many ? result.outputDir : first.path)}
+          className="pressable h-11 flex-1 rounded-[15px] bg-white/80 text-[13px] font-semibold shadow-[inset_0_0_0_1px_var(--color-divider)]"
+        >
+          Im Finder zeigen
+        </button>
+        <button
+          onClick={props.onStartOver}
+          className="pressable h-11 flex-1 rounded-[15px] bg-[var(--color-accent)] text-[13px] font-semibold text-white shadow-[0_4px_12px_rgba(6,22,26,0.22)]"
+        >
+          Noch eins
+        </button>
+      </div>
+    </>
+  );
+}
+
+const ssimText = (value: number) =>
+  value.toLocaleString("de-DE", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+const fpsText = (fps: number) =>
+  Math.abs(fps - Math.round(fps)) < 0.005
+    ? String(Math.round(fps))
+    : fps.toLocaleString("de-DE", { maximumFractionDigits: 2 });
+
+/**
+ * The finished state for videos — the same frame as for images (three lines
+ * beside the thumbnail, one card, two buttons), so the fixed heights hold.
+ *
+ * Two things can go wrong, and both are said with their number instead of
+ * being hidden: the encoder could not get down to the target (`limitMissed`),
+ * or it did, but the picture paid for it (`soft`, SSIM under 0,95). Soft is
+ * not fixed by shrinking the picture behind the user's back — measured, that
+ * makes it worse — so the panel says the target is too tight.
+ */
+function DoneVideo(props: {
+  result: VideoBatchResult;
+  sourceBytes: number;
+  preview: string | null;
+  onStartOver: () => void;
+}) {
+  const { result } = props;
+  const files = result.videos.flatMap((v) => (v.output ? [v.output] : []));
+  const failed = result.videos.filter((v) => v.error);
+  const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
+  const target = files.reduce((sum, f) => sum + f.targetBytes, 0);
+  const used = target ? Math.min(100, (bytes / target) * 100) : 100;
+  const first = files[0];
+  const many = files.length > 1;
+  const missed = files.filter((f) => f.limitMissed);
+  const soft = files.filter((f) => f.soft);
+  const measured = files.flatMap((f) => (f.ssim == null ? [] : [f.ssim]));
+  const lowest = measured.length ? Math.min(...measured) : null;
+  const withPoster = files.every((f) => f.poster);
+  const overColor = "var(--color-over)";
+  const barRamp = useRamp(1500, 340);
+  const numberRamp = useRamp(1500, 440);
+
+  const passes = (f: (typeof files)[number]) =>
+    f.attempts.map((a) => kb(a.bytes)).join(" → ");
+  const details = files
+    .map(
+      (f) =>
+        `${f.fileName} · ${kb(f.bytes)} von ${kb(f.targetBytes)} · Durchgänge ${passes(f)}` +
+        (f.ssim == null ? "" : ` · SSIM ${ssimText(f.ssim)}, schwächstes Bild ${ssimText(f.ssimWorst ?? f.ssim)}`) +
+        (f.poster ? ` · Poster ${f.poster.fileName} ${kb(f.poster.bytes)}` : " · ohne Poster") +
+        ` · Schnipsel ${f.snippetFileName}`,
+    )
+    .join("\n");
+
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <Thumb src={props.preview} badge over={missed.length > 0 || failed.length > 0} />
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
+          <p className="truncate text-[13px] font-semibold">
+            {failed.length > 0
+              ? `${files.length} von ${result.videos.length} fertig`
+              : many
+                ? `${files.length} Videos`
+                : first?.fileName}
+          </p>
+          <p className="truncate text-[11px] text-[var(--color-ink-2)] tabular-nums" title={details}>
+            {first &&
+              `${first.width} × ${first.height} px · ${fpsText(first.fps)} fps${
+                lowest == null ? "" : ` · SSIM ${many ? "ab " : ""}${ssimText(lowest)}`
+              }`}
+          </p>
+          {failureLines(failed).map((line) => (
+            <p
+              key={line}
+              className="truncate text-[11px] text-[var(--color-over)]"
+              title={failed.map((f) => `${sourceName(f.source)} — ${f.error}`).join("\n")}
+            >
+              {line}
+            </p>
+          ))}
+        </div>
+      </div>
+
+      <div
+        className="flex flex-col gap-[9px] rounded-[20px] bg-white/[0.62] px-3.5 py-[13px]"
+        style={{ boxShadow: "inset 0 0 0 1px rgba(15,44,43,0.1)" }}
+        title={details}
+      >
+        <div className="flex items-baseline gap-2">
+          <span
+            className="text-[27px] leading-none font-semibold tracking-[-0.02em] tabular-nums"
+            style={missed.length ? { color: overColor } : undefined}
+          >
+            <Counting value={(bytes / 1_000_000) * numberRamp} digits={2} /> MB
+          </span>
+          <span className="text-[12px] text-[var(--color-ink-2)]">aus {kb(props.sourceBytes)}</span>
+        </div>
+        <div className="h-[7px] overflow-hidden rounded-full" style={{ background: "var(--color-divider)" }}>
+          <div
+            className="h-full rounded-full bg-[var(--color-accent)]"
+            style={{
+              width: `${used * barRamp}%`,
+              ...(missed.length ? { background: overColor } : null),
+            }}
+          />
+        </div>
+        {missed.length ? (
+          <div
+            className="flex items-baseline justify-between gap-2 text-[10px] font-semibold tracking-[0.02em]"
+            style={{ color: overColor }}
+          >
+            <span className="truncate">
+              {missed.length > 1
+                ? `${missed.length} von ${files.length} über dem Ziel`
+                : `Über ${kb(missed[0].targetBytes)}`}
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {kb(missed[0].bytes)} · {missed[0].attempts.length} Durchgänge
+            </span>
+          </div>
+        ) : soft.length ? (
+          <div
+            className="flex items-baseline justify-between gap-2 text-[10px] font-semibold tracking-[0.02em]"
+            style={{ color: overColor }}
+          >
+            <span className="truncate tabular-nums">
+              Weich · SSIM {ssimText(Math.min(...soft.map((f) => f.ssim ?? 1)))}
+            </span>
+            <span className="shrink-0">Ziel zu knapp</span>
+          </div>
+        ) : (
+          <div className="flex justify-between gap-2 text-[10px] font-medium tracking-[0.02em] text-[var(--color-ink-2)]">
+            <span className="shrink-0 tabular-nums">
+              <Counting value={used * numberRamp} digits={0} /> % des Ziels
+            </span>
+            <span className="truncate">{withPoster ? "mit Poster und Schnipsel" : "mit Schnipsel"}</span>
           </div>
         )}
       </div>

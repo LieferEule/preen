@@ -11,6 +11,10 @@ export interface ImageInfo {
   height: number;
   /** Size of the original file in bytes. */
   bytes: number;
+  /** A run is images or videos, never both. */
+  kind: "image" | "video";
+  /** Videos only. */
+  durationSeconds: number | null;
 }
 
 export interface Rejected {
@@ -60,8 +64,9 @@ export interface Limits {
   overwrite: boolean;
 }
 
-export const inspectImages = (paths: string[]) =>
-  invoke<{ images: ImageInfo[]; rejected: Rejected[] }>("inspect_images", { paths });
+/** `loadedKind`: what the panel already holds — files of the other kind are turned down. */
+export const inspectImages = (paths: string[], loadedKind: "image" | "video" | null) =>
+  invoke<{ images: ImageInfo[]; rejected: Rejected[] }>("inspect_images", { paths, loadedKind });
 
 export const suggestSlug = (text: string) => invoke<string>("suggest_slug", { text });
 /** The name suggested from an original's file name; empty for machine names. */
@@ -83,6 +88,47 @@ export const processImages = (args: {
   customOutputDir: string | null;
   limits: Limits;
 }) => invoke<BatchResult>("process_images", args);
+
+export interface VideoOutput {
+  path: string;
+  fileName: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationSeconds: number;
+  bytes: number;
+  /** What the passes aimed at: the size target, or the source's size if smaller. */
+  targetBytes: number;
+  attempts: { bitrate: number; bytes: number }[];
+  /** More than 3 % over the target even after correcting. */
+  limitMissed: boolean;
+  /** Mean SSIM of 24 frames against the source, at the output size. */
+  ssim: number | null;
+  ssimWorst: number | null;
+  /** SSIM under 0,95: the target is too tight for this clip. */
+  soft: boolean;
+  poster: { fileName: string; bytes: number; quality: number; limitMissed: boolean } | null;
+  snippet: string;
+  snippetFileName: string;
+}
+
+export interface VideoResult {
+  source: string;
+  output: VideoOutput | null;
+  error: string | null;
+}
+
+export interface VideoBatchResult {
+  outputDir: string;
+  videos: VideoResult[];
+}
+
+export const processVideos = (args: {
+  paths: string[];
+  slug: string;
+  customOutputDir: string | null;
+  limits: { longEdge: number; maxKb: number; posterKb: number | null; overwrite: boolean };
+}) => invoke<VideoBatchResult>("process_videos", args);
 
 export const onProgress = (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>
   listen<{ done: number; total: number }>("preen://progress", (e) => cb(e.payload));

@@ -1,7 +1,8 @@
 # Preen
 
-Preen macht Bilder web-fertig: Foto hineinziehen, Name eintippen, fertig ist
-eine WebP-Datei, die unter einer Größengrenze bleibt und trotzdem gut aussieht.
+Preen macht Bilder und Videos web-fertig: Datei hineinziehen, Name eintippen,
+fertig ist eine WebP- oder MP4-Datei, die unter einer Größengrenze bleibt und
+trotzdem gut aussieht.
 Die App liegt als kleines Panel auf dem Schreibtisch, ist über ein Tastenkürzel
 da und wieder weg, und rechnet alles auf dem eigenen Rechner.
 
@@ -68,10 +69,36 @@ Bestehende Dateien werden nie überschrieben: Preen zählt weiter zu
 `bild-02.webp`, `bild-03.webp`. Wer das nicht will, schaltet in den
 Feineinstellungen **Bestehende Dateien ersetzen** ein.
 
+## Videos
+
+Ein fertig geschnittenes Video (MP4, MOV, M4V) wird genauso hineingezogen.
+Heraus kommen drei Dateien mit demselben Namen:
+
+- `name.mp4` — H.264 ohne Ton, höchstens 30 Bilder pro Sekunde, mit dem
+  Index am Anfang, damit der Browser sofort abspielen kann
+- `name.webp` — das erste Bild als Poster, zu sehen bis das Video läuft
+- `name.html` — das fertige `<video>`-Element für die Seite
+
+|  | lange Kante bis | Zielgröße |
+| --- | --- | --- |
+| **Inhaltsbild** | 1280 px | 1 MB |
+| **Hero** | 1920 px | 2 MB |
+
+Die Größe trifft Preen, indem es kodiert, nachmisst und korrigiert — der
+Hardware-Encoder liegt beim ersten Versuch bis zu 15 % daneben. Danach
+vergleicht Preen 24 Bilder mit dem Original. Wird das Ergebnis dabei sichtbar
+weich, sagt das Panel es mit der Zahl, statt heimlich die Auflösung zu senken:
+gemessen macht ein kleineres Bild bei gleicher Dateigröße es schlechter, nicht
+besser. Kodiert wird mit dem, was macOS mitbringt; Preen enthält weder
+ffmpeg noch HandBrake.
+
+Bilder und Videos gehen nicht in einem Lauf: Wer ein Video hineinzieht,
+während Bilder geladen sind, bekommt einen Hinweis statt einer Überraschung.
+
 ## Alles bleibt hier
 
 Preen hat keine Netzwerkfunktion, kein Konto, keine Anmeldung und keine
-Statistik. Die Bilder werden auf dem Rechner dekodiert, skaliert und kodiert
+Statistik. Bilder und Videos werden auf dem Rechner dekodiert, skaliert und kodiert
 und landen in dem Ordner, den man auswählt. Sonst passiert nichts.
 
 ## Lizenz
