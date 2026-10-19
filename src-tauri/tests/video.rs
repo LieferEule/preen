@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use preen_lib::avfoundation;
 use preen_lib::video::{self, VideoBatchResult, VideoOutput, VideoSettings, SIZE_TOLERANCE};
+use preen_lib::{avfoundation, imageio};
 
 /// 1600x900, 60 fps, 4 s, with a sound track.
 const MOVING: &str = "bewegt-1600x900-60fps.mp4";
@@ -16,6 +16,7 @@ const SMALL: VideoSettings = VideoSettings {
     long_edge: 1280,
     max_bytes: 400_000,
     overwrite: false,
+    poster_max_bytes: Some(260_000),
 };
 
 fn fixture_copy(dir: &Path, name: &str) -> PathBuf {
@@ -219,4 +220,48 @@ fn unreadable_files_fail_alone_and_leave_nothing_behind() {
         assert!(e.chars().count() <= 42, "zu lang fürs Panel: {e}");
     }
     assert!(leftovers(Path::new(&out.output_dir)).is_empty());
+}
+
+#[test]
+fn poster_and_snippet_lie_next_to_the_video() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = fixture_copy(dir.path(), MOVING);
+    let file = only(&run(&[source], "hero", &SMALL)).clone();
+
+    let poster = file.poster.as_ref().expect("kein Poster");
+    assert_eq!(poster.file_name, "hero.webp");
+    assert!(!poster.limit_missed);
+    let webp = fs::read(dir.path().join("hero.webp")).unwrap();
+    assert_eq!(webp.len() as u64, poster.bytes);
+    assert!(poster.bytes <= 260_000);
+    assert_eq!(&webp[0..4], b"RIFF");
+    assert_eq!(&webp[8..12], b"WEBP");
+    let (w, h) = imageio::dimensions(&dir.path().join("hero.webp")).unwrap();
+    assert_eq!((w, h), (file.width, file.height));
+
+    assert_eq!(file.snippet_file_name, "hero.html");
+    let html = fs::read_to_string(dir.path().join("hero.html")).unwrap();
+    assert_eq!(html, file.snippet);
+    assert!(html.contains(r#"src="hero.mp4""#), "{html}");
+    assert!(html.contains(r#"poster="hero.webp""#), "{html}");
+    assert!(html.contains("autoplay muted loop playsinline"), "{html}");
+    assert!(html.contains(r#"width="1280" height="720""#), "{html}");
+}
+
+/// A name counts as taken if any file of the set is there — an image run
+/// that left `clip.webp` must not get its poster replaced.
+#[test]
+fn the_three_files_share_one_free_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = fixture_copy(dir.path(), ROTATED);
+    fs::write(dir.path().join("clip.webp"), b"fremd").unwrap();
+    fs::write(dir.path().join("clip-02.html"), b"fremd").unwrap();
+    let file = only(&run(&[source], "clip", &SMALL)).clone();
+    assert_eq!(file.file_name, "clip-03.mp4");
+    assert_eq!(file.poster.unwrap().file_name, "clip-03.webp");
+    assert_eq!(file.snippet_file_name, "clip-03.html");
+    assert_eq!(fs::read(dir.path().join("clip.webp")).unwrap(), b"fremd");
+    assert_eq!(fs::read(dir.path().join("clip-02.html")).unwrap(), b"fremd");
+    assert!(!dir.path().join("clip.mp4").exists());
+    assert!(!dir.path().join("clip-02.mp4").exists());
 }

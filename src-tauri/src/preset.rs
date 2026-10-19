@@ -67,18 +67,23 @@ pub struct VideoPreset {
     pub long_edge: u32,
     /// Size target, in KB of 1000 bytes (like Finder).
     pub max_kb: u64,
+    /// Limit for the poster WebP — that of the image preset of the same
+    /// name, so a poster weighs what any other picture there would.
+    pub poster_kb: u64,
 }
 
 pub const HERO_VIDEO: VideoPreset = VideoPreset {
     name: "hero",
     long_edge: 1920,
     max_kb: 2000,
+    poster_kb: HERO.max_kb,
 };
 
 pub const INHALT_VIDEO: VideoPreset = VideoPreset {
     name: "inhaltsbild",
     long_edge: 1280,
     max_kb: 1000,
+    poster_kb: INHALTSBILD.max_kb,
 };
 
 pub const ALL_VIDEO: [VideoPreset; 2] = [INHALT_VIDEO, HERO_VIDEO];
@@ -89,6 +94,7 @@ impl VideoPreset {
             long_edge: self.long_edge,
             max_bytes: self.max_kb * 1000,
             overwrite,
+            poster_max_bytes: Some(self.poster_kb * 1000),
         }
     }
 }

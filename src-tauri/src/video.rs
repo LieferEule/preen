@@ -13,12 +13,14 @@
 //! than a smaller picture saves them. The long edge is only a ceiling.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::avfoundation::{self, EncodeSettings, Probe};
 use crate::imageio;
+use crate::pipeline::{encode_within_limit, Encoded};
 use crate::pipeline::{ensure_writable, next_stem, plan_names, resolve_output_dir};
 use crate::sizes::{output_size, Limits};
 
@@ -54,6 +56,9 @@ pub struct VideoSettings {
     pub max_bytes: u64,
     /// Replace a file that is already there instead of counting up.
     pub overwrite: bool,
+    /// Size limit for the poster WebP; `None` means quality 80 whatever it
+    /// weighs.
+    pub poster_max_bytes: Option<u64>,
 }
 
 /// What will be asked of the encoder, before the first pass.
@@ -110,6 +115,22 @@ pub struct VideoOutput {
     /// clip. Said out loud instead of shrinking the picture behind the
     /// user's back.
     pub soft: bool,
+    /// First frame as WebP, next to the video — what the browser shows
+    /// before playback starts. `None` if it could not be made; the video
+    /// stands without it.
+    pub poster: Option<Poster>,
+    /// The `<video>` element for these files, also written as `<name>.html`.
+    pub snippet: String,
+    pub snippet_file_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Poster {
+    pub file_name: String,
+    pub bytes: u64,
+    pub quality: u8,
+    pub limit_missed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -313,14 +334,36 @@ fn process_video(
 
     let kept = passes.path(fit.chosen);
     let quality = measure(source, &kept, &plan, &probe).ok();
-    let path = place(&kept, path, settings.overwrite)?;
+    let poster = make_poster(&kept, settings.poster_max_bytes).ok();
+    let poster_pass = passes.dir.join("poster.webp");
+    let poster = poster.and_then(|p| fs::write(&poster_pass, &p.data).ok().map(|_| p));
+
+    let mut files = vec![(kept.as_path(), "mp4")];
+    if poster.is_some() {
+        files.push((poster_pass.as_path(), "webp"));
+    }
+    let stem = place(&files, path, settings.overwrite)?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let poster = poster.map(|p| Poster {
+        file_name: format!("{stem}.webp"),
+        bytes: p.data.len() as u64,
+        quality: p.quality,
+        limit_missed: p.limit_missed,
+    });
+    let snippet = snippet(
+        &format!("{stem}.mp4"),
+        poster.as_ref().map(|p| p.file_name.as_str()),
+        plan.width,
+        plan.height,
+    );
+    let snippet_file_name = format!("{stem}.html");
+    write_text(&dir.join(&snippet_file_name), &snippet, settings.overwrite)?;
+
+    let video_path = dir.join(format!("{stem}.mp4"));
     let bytes = fit.attempts[fit.chosen].bytes;
     Ok(VideoOutput {
-        file_name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        path: path.to_string_lossy().into_owned(),
+        file_name: format!("{stem}.mp4"),
+        path: video_path.to_string_lossy().into_owned(),
         width: plan.width,
         height: plan.height,
         fps: plan.fps,
@@ -332,7 +375,57 @@ fn process_video(
         ssim: quality.map(|q| q.0),
         ssim_worst: quality.map(|q| q.1),
         soft: quality.is_some_and(|q| q.0 < SOFT_SSIM),
+        poster,
+        snippet,
+        snippet_file_name,
     })
+}
+
+/// The first frame of the finished file — not of the source: the poster has
+/// to be the picture playback starts on, or the hero jumps when it begins.
+fn make_poster(encoded: &Path, max_bytes: Option<u64>) -> Result<Encoded, String> {
+    let frame = avfoundation::Frames::open(encoded)?.at(0.0)?;
+    let bitmap = imageio::bitmap_from_image(&frame)?;
+    encode_within_limit(
+        bitmap.pixels,
+        bitmap.width,
+        bitmap.height,
+        bitmap.has_alpha,
+        max_bytes,
+    )
+}
+
+/// A background video as a website wants it: plays by itself, which browsers
+/// only allow without sound; loops; stays inline on iPhones instead of going
+/// full screen; and carries its size, so the layout does not jump.
+pub fn snippet(video: &str, poster: Option<&str>, width: u32, height: u32) -> String {
+    let poster = poster
+        .map(|p| format!(" poster=\"{}\"", html_attr(p)))
+        .unwrap_or_default();
+    format!(
+        "<video autoplay muted loop playsinline{poster} width=\"{width}\" height=\"{height}\">\n  \
+         <source src=\"{}\" type=\"video/mp4\">\n</video>\n",
+        html_attr(video)
+    )
+}
+
+fn html_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+}
+
+fn write_text(path: &Path, text: &str, overwrite: bool) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    if overwrite {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    let mut file = options.open(path).map_err(|e| e.to_string())?;
+    file.write_all(text.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// When to compare: [`SSIM_SAMPLES`] moments spread over the clip, each just
@@ -443,38 +536,62 @@ impl Drop for Passes {
     }
 }
 
-/// Moves the finished pass to its name and says where it landed.
+/// Moves the finished files (video, and poster if there is one) to one
+/// shared name and returns that name's stem.
 ///
-/// Without `overwrite` nothing that is there is touched: a hard link either
-/// takes the name or reports it taken — the same race-free rule as
-/// `pipeline::write_file`, with the same `-02`, `-03` … numbering.
-fn place(pass: &Path, path: &Path, overwrite: bool) -> Result<PathBuf, String> {
-    if overwrite {
-        fs::rename(pass, path).map_err(|e| e.to_string())?;
-        return Ok(path.to_path_buf());
-    }
+/// Without `overwrite` nothing that is there is touched: a stem is only taken
+/// if none of its files exist, and the video then claims it with a hard link,
+/// which either takes the name or reports it taken — the same race-free rule
+/// as `pipeline::write_file`, with the same `-02`, `-03` … numbering. The
+/// snippet (`.html`) is part of the set, so a stem whose `.html` exists is
+/// passed over too.
+fn place(files: &[(&Path, &str)], path: &Path, overwrite: bool) -> Result<String, String> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let extension = path.extension().unwrap_or_default().to_string_lossy();
     let mut stem = path
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    for attempt in 1..=MAX_NAME_ATTEMPTS {
-        let candidate = if attempt == 1 {
-            path.to_path_buf()
-        } else {
-            stem = next_stem(&stem);
-            dir.join(format!("{stem}.{extension}"))
-        };
-        match fs::hard_link(pass, &candidate) {
-            Ok(()) => {
-                let _ = fs::remove_file(pass);
-                return Ok(candidate);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.to_string()),
+    let target = |stem: &str, extension: &str| dir.join(format!("{stem}.{extension}"));
+
+    if overwrite {
+        for (file, extension) in files {
+            fs::rename(file, target(&stem, extension)).map_err(|e| e.to_string())?;
         }
+        return Ok(stem);
+    }
+    'stems: for attempt in 1..=MAX_NAME_ATTEMPTS {
+        if attempt > 1 {
+            stem = next_stem(&stem);
+        }
+        let extensions = files.iter().map(|(_, e)| *e).chain(["html"]);
+        if extensions
+            .clone()
+            .skip(1)
+            .any(|e| target(&stem, e).exists())
+        {
+            continue;
+        }
+        let mut linked = Vec::new();
+        for (file, extension) in files {
+            let to = target(&stem, extension);
+            match fs::hard_link(file, &to) {
+                Ok(()) => linked.push(to),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    for done in &linked {
+                        let _ = fs::remove_file(done);
+                    }
+                    continue 'stems;
+                }
+                Err(e) => {
+                    for done in &linked {
+                        let _ = fs::remove_file(done);
+                    }
+                    return Err(e.to_string());
+                }
+            }
+        }
+        return Ok(stem);
     }
     Err(format!(
         "Kein freier Dateiname nach {MAX_NAME_ATTEMPTS} Versuchen"
@@ -500,6 +617,7 @@ mod tests {
         long_edge: 1920,
         max_bytes: 2_000_000,
         overwrite: false,
+        poster_max_bytes: None,
     };
 
     #[test]
@@ -673,6 +791,17 @@ mod tests {
             assert!(into_frame > 0.0 && into_frame < 0.5, "{t}");
         }
         assert!(times.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn snippet_plays_silently_inline_and_keeps_its_size() {
+        assert_eq!(
+            snippet("hero.mp4", Some("hero.webp"), 1920, 1080),
+            "<video autoplay muted loop playsinline poster=\"hero.webp\" width=\"1920\" height=\"1080\">\n  \
+             <source src=\"hero.mp4\" type=\"video/mp4\">\n</video>\n"
+        );
+        assert!(!snippet("a.mp4", None, 2, 2).contains("poster"));
+        assert!(snippet("a\"b.mp4", None, 2, 2).contains("a&quot;b.mp4"));
     }
 
     #[test]
