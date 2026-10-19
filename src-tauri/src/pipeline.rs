@@ -162,6 +162,18 @@ pub fn plan_file_names(
     output_dir: &Path,
     avoid_existing: bool,
 ) -> Vec<String> {
+    plan_names(slug, count, output_dir, avoid_existing, "webp")
+}
+
+/// [`plan_file_names`] for any file type — videos go through the same
+/// numbering as images.
+pub(crate) fn plan_names(
+    slug: &str,
+    count: usize,
+    output_dir: &Path,
+    avoid_existing: bool,
+    extension: &str,
+) -> Vec<String> {
     let existing = if avoid_existing {
         existing_file_names(output_dir)
     } else {
@@ -169,7 +181,7 @@ pub fn plan_file_names(
     };
     plan_base_names(&slugify(slug), count, existing.iter().map(String::as_str))
         .into_iter()
-        .map(|stem| format!("{stem}.webp"))
+        .map(|stem| format!("{stem}.{extension}"))
         .collect()
 }
 
@@ -471,7 +483,7 @@ fn write_file(path: &Path, bytes: &[u8], overwrite: bool) -> Result<(PathBuf, u6
 /// The next name after `stem`, in the shape the batch numbering already uses:
 /// `bild` → `bild-02`, `bild-02` → `bild-03`. One counter for both, so a
 /// folder does not end up with `bild-02.webp` next to `bild-2.webp`.
-fn next_stem(stem: &str) -> String {
+pub(crate) fn next_stem(stem: &str) -> String {
     if let Some((head, tail)) = stem.rsplit_once('-') {
         if !head.is_empty() && tail.len() >= 2 {
             if let Ok(number) = tail.parse::<u32>() {
@@ -484,7 +496,7 @@ fn next_stem(stem: &str) -> String {
 
 /// Proves the folder takes a file, instead of trusting a permission bit that
 /// says little about folders owned by someone else.
-fn ensure_writable(dir: &Path) -> Result<(), String> {
+pub(crate) fn ensure_writable(dir: &Path) -> Result<(), String> {
     let probe = dir.join(format!(
         ".preen-schreibprobe-{}-{}",
         std::process::id(),

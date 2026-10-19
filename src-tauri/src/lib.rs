@@ -1,3 +1,4 @@
+pub mod avfoundation;
 mod corners;
 mod frame;
 pub mod imageio;
@@ -9,6 +10,7 @@ mod settings;
 mod shortcut;
 pub mod sizes;
 mod tray;
+pub mod video;
 mod windows;
 
 use std::path::{Path, PathBuf};
