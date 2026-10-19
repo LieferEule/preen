@@ -82,7 +82,7 @@ Heraus kommen drei Dateien mit demselben Namen:
 |  | lange Kante bis | Zielgröße |
 | --- | --- | --- |
 | **Inhaltsbild** | 1280 px | 1 MB |
-| **Hero** | 1920 px | 2 MB |
+| **Hero** | 1920 px | 4 MB |
 
 Die Größe trifft Preen, indem es kodiert, nachmisst und korrigiert — der
 Hardware-Encoder liegt beim ersten Versuch bis zu 15 % daneben. Danach

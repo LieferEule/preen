@@ -85,7 +85,7 @@ Funktion wie der Tauri-Befehl auf (pipeline::convert):
 Presets: inhaltsbild (lange Kante 1600, 1,8 MP, 260 KB, Notfall-
 Untergrenze 1000), hero (2400, 3,5 MP, 500 KB, Untergrenze 1600).
 Videos (mp4, mov, m4v) im selben Aufruf gehen durch video::convert:
-inhaltsbild 1280 / 1 MB, hero 1920 / 2 MB, H.264 ohne Ton, höchstens
+inhaltsbild 1280 / 1 MB, hero 1920 / 4 MB, H.264 ohne Ton, höchstens
 30 fps, Poster als .webp und <video>-Schnipsel als .html daneben.
 Das Byte-Ziel trifft eine Mess- und Korrekturschleife (±3 %), weil
 VideoToolbox ±15 % danebenliegt; unter 0,95 SSIM heißt das Ergebnis

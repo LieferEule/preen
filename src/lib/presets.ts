@@ -42,7 +42,7 @@ export const PRESETS: Preset[] = [
     maxMegapixels: 3.5,
     maxKb: 500,
     minLongEdge: 1600,
-    video: { longEdge: 1920, maxKb: 2000 },
+    video: { longEdge: 1920, maxKb: 4000 },
   },
 ];
 

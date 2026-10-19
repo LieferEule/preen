@@ -20,7 +20,7 @@ preen-cli — Bilder als WebP und Videos als MP4 web-fertig, ohne GUI
 
   --preset <name>   inhaltsbild (Bild: lange Kante 1600, 1,8 MP, 260 KB;
                     Video: 1280, 1 MB) oder hero (Bild: 2400, 3,5 MP,
-                    500 KB; Video: 1920, 2 MB). Vorgabe: inhaltsbild
+                    500 KB; Video: 1920, 4 MB). Vorgabe: inhaltsbild
   --name <text>     Zielname; wird zum Slug für Dateinamen und Unterordner
   --out <ordner>    Zielordner. Vorgabe: der Ordner des ersten Bildes
   --replace         bestehende Zieldateien ersetzen. Ohne das zählt ein

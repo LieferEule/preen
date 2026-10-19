@@ -72,10 +72,14 @@ pub struct VideoPreset {
     pub poster_kb: u64,
 }
 
+/// 4 MB, not 2: the usual advice for a hero clip is 2–5 MB, and measured on
+/// a 17 s phone clip 2 MB gave SSIM 0,984, 4 MB 0,994. More does not rescue
+/// a clip with film grain (0,841 at 2 MB, still 0,895 at 8 MB) — grain does
+/// not compress, so that one is reported as soft instead.
 pub const HERO_VIDEO: VideoPreset = VideoPreset {
     name: "hero",
     long_edge: 1920,
-    max_kb: 2000,
+    max_kb: 4000,
     poster_kb: HERO.max_kb,
 };
 
@@ -146,7 +150,7 @@ mod tests {
         assert_eq!(video_by_name("hero"), Some(HERO_VIDEO));
         assert_eq!(video_by_name("content"), Some(INHALT_VIDEO));
         assert_eq!(video_by_name("Inhaltsbild"), Some(INHALT_VIDEO));
-        assert_eq!(HERO_VIDEO.settings(false).max_bytes, 2_000_000);
+        assert_eq!(HERO_VIDEO.settings(false).max_bytes, 4_000_000);
         assert_eq!(INHALT_VIDEO.settings(false).long_edge, 1280);
     }
 }
