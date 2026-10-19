@@ -22,9 +22,10 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::AnyThread;
 use objc2_av_foundation::{
-    AVAsset, AVAssetReader, AVAssetReaderStatus, AVAssetReaderVideoCompositionOutput, AVAssetTrack,
-    AVAssetWriter, AVAssetWriterInput, AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeAudio,
-    AVMediaTypeVideo, AVMutableVideoComposition, AVURLAsset, AVVideoAllowFrameReorderingKey,
+    AVAsset, AVAssetImageGenerator, AVAssetReader, AVAssetReaderStatus,
+    AVAssetReaderVideoCompositionOutput, AVAssetTrack, AVAssetWriter, AVAssetWriterInput,
+    AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo,
+    AVMutableVideoComposition, AVURLAsset, AVVideoAllowFrameReorderingKey,
     AVVideoAverageBitRateKey, AVVideoCodecKey, AVVideoCodecTypeH264, AVVideoColorPrimariesKey,
     AVVideoColorPrimaries_ITU_R_709_2, AVVideoColorPropertiesKey, AVVideoCompressionPropertiesKey,
     AVVideoExpectedSourceFrameRateKey, AVVideoHeightKey, AVVideoMaxKeyFrameIntervalDurationKey,
@@ -33,7 +34,8 @@ use objc2_av_foundation::{
     AVVideoWidthKey, AVVideoYCbCrMatrixKey, AVVideoYCbCrMatrix_ITU_R_709_2,
 };
 use objc2_core_foundation::CFString;
-use objc2_core_media::CMTime;
+use objc2_core_graphics::CGImage;
+use objc2_core_media::{kCMTimeZero, CMTime};
 use objc2_core_video::{
     kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
 };
@@ -204,6 +206,36 @@ pub fn encode(source: &Path, dest: &Path, settings: &EncodeSettings) -> Result<(
     match unsafe { writer.status() } {
         AVAssetWriterStatus::Completed => Ok(()),
         _ => Err(writer_error(&writer)),
+    }
+}
+
+/// Single frames of a video, as shown (rotation applied), taken at exactly
+/// the asked time — not the nearest keyframe, which is what the generator
+/// would hand out by default and which would compare different moments.
+pub struct Frames {
+    generator: Retained<AVAssetImageGenerator>,
+}
+
+impl Frames {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        let asset = open(path)?;
+        video_track(&asset)?;
+        let generator = unsafe { AVAssetImageGenerator::assetImageGeneratorWithAsset(&asset) };
+        unsafe {
+            generator.setAppliesPreferredTrackTransform(true);
+            generator.setRequestedTimeToleranceBefore(kCMTimeZero);
+            generator.setRequestedTimeToleranceAfter(kCMTimeZero);
+        }
+        Ok(Self { generator })
+    }
+
+    pub fn at(&self, seconds: f64) -> Result<Retained<CGImage>, String> {
+        let time = unsafe { CMTime::with_seconds(seconds, 60_000) };
+        unsafe {
+            self.generator
+                .copyCGImageAtTime_actualTime_error(time, std::ptr::null_mut())
+        }
+        .map_err(|e| format!("Einzelbild nicht lesbar: {}", e.localizedDescription()))
     }
 }
 

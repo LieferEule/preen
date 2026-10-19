@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::avfoundation::{self, EncodeSettings, Probe};
+use crate::imageio;
 use crate::pipeline::{ensure_writable, next_stem, plan_names, resolve_output_dir};
 use crate::sizes::{output_size, Limits};
 
@@ -34,6 +35,15 @@ const MIN_BITRATE: u64 = 100_000;
 /// File extensions accepted as input (compared case-insensitively).
 pub const SUPPORTED_EXTENSIONS: [&str; 3] = ["mp4", "mov", "m4v"];
 const MAX_NAME_ATTEMPTS: u32 = 999;
+/// Frames compared against the source after encoding, spread evenly.
+pub const SSIM_SAMPLES: usize = 24;
+/// Below this mean SSIM the result counts as soft, and the panel says so
+/// with the number. Set from three real clips: a phone clip and a screen
+/// recording at 0,969–0,987 look like their source; a screen recording with
+/// film grain at 0,928 (1 MB) and 0,841 (2 MB) lost the grain and a line of
+/// faint text — visibly. The 24 samples agree with ffmpeg's `ssim` over every
+/// frame to within 0,003.
+pub const SOFT_SSIM: f64 = 0.95;
 
 /// What one run should produce.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,6 +100,16 @@ pub struct VideoOutput {
     pub attempts: Vec<Attempt>,
     /// The file is more than [`SIZE_TOLERANCE`] over the size target.
     pub limit_missed: bool,
+    /// Mean SSIM (luma) of [`SSIM_SAMPLES`] frames against the source, both
+    /// at the output size — what the compression cost, not the resizing.
+    /// `None` if the frames could not be read; that is no reason to fail.
+    pub ssim: Option<f64>,
+    /// The weakest of those frames.
+    pub ssim_worst: Option<f64>,
+    /// Mean SSIM below [`SOFT_SSIM`]: the size target is too tight for this
+    /// clip. Said out loud instead of shrinking the picture behind the
+    /// user's back.
+    pub soft: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,7 +311,9 @@ fn process_video(
             .map_err(|e| e.to_string())
     })?;
 
-    let path = place(&passes.path(fit.chosen), path, settings.overwrite)?;
+    let kept = passes.path(fit.chosen);
+    let quality = measure(source, &kept, &plan, &probe).ok();
+    let path = place(&kept, path, settings.overwrite)?;
     let bytes = fit.attempts[fit.chosen].bytes;
     Ok(VideoOutput {
         file_name: path
@@ -307,7 +329,87 @@ fn process_video(
         target_bytes: plan.target_bytes,
         attempts: fit.attempts,
         limit_missed: fit.limit_missed,
+        ssim: quality.map(|q| q.0),
+        ssim_worst: quality.map(|q| q.1),
+        soft: quality.is_some_and(|q| q.0 < SOFT_SSIM),
     })
+}
+
+/// When to compare: [`SSIM_SAMPLES`] moments spread over the clip, each just
+/// after the start of an output frame. Taken at an arbitrary time, the source
+/// (60 fps) would show the frame the output (30 fps) dropped, and the
+/// comparison would measure motion instead of compression.
+pub fn sample_times(duration_seconds: f64, fps: f64, source_fps: f64) -> Vec<f64> {
+    let frames = (duration_seconds * fps).floor().max(1.0);
+    (0..SSIM_SAMPLES)
+        .map(|i| {
+            let frame = ((i as f64 + 0.5) / SSIM_SAMPLES as f64 * frames).floor();
+            frame / fps + 0.25 / source_fps.max(fps)
+        })
+        .filter(|t| *t < duration_seconds)
+        .collect()
+}
+
+/// (mean, worst) SSIM of the encoded file against its source.
+fn measure(
+    source: &Path,
+    encoded: &Path,
+    plan: &Plan,
+    probe: &Probe,
+) -> Result<(f64, f64), String> {
+    let original = avfoundation::Frames::open(source)?;
+    let result = avfoundation::Frames::open(encoded)?;
+    let (w, h) = (plan.width, plan.height);
+    let mut scores = Vec::new();
+    for t in sample_times(probe.duration_seconds, plan.fps, probe.fps) {
+        let a = imageio::luma_from_image(&*original.at(t)?, w, h)?;
+        let b = imageio::luma_from_image(&*result.at(t)?, w, h)?;
+        scores.push(ssim(&a, &b, w as usize, h as usize));
+    }
+    if scores.is_empty() {
+        return Err("keine Stichproben".to_string());
+    }
+    let mean = scores.iter().sum::<f64>() / scores.len() as f64;
+    let worst = scores.iter().cloned().fold(f64::INFINITY, f64::min);
+    Ok((mean, worst))
+}
+
+/// Structural similarity of two 8-bit luma planes of the same size, as
+/// ffmpeg's `ssim` filter computes it for Y: 8×8 windows every 4
+/// pixels, the usual constants, mean over all windows. 1 is identical.
+pub fn ssim(a: &[u8], b: &[u8], width: usize, height: usize) -> f64 {
+    const C1: f64 = (0.01 * 255.0) * (0.01 * 255.0);
+    const C2: f64 = (0.03 * 255.0) * (0.03 * 255.0);
+    const N: usize = 8;
+    if width < N || height < N {
+        return if a == b { 1.0 } else { 0.0 };
+    }
+    let (mut total, mut count) = (0.0, 0usize);
+    for y in (0..=height - N).step_by(4) {
+        for x in (0..=width - N).step_by(4) {
+            let (mut sa, mut sb, mut saa, mut sbb, mut sab) = (0u64, 0u64, 0u64, 0u64, 0u64);
+            for row in y..y + N {
+                let start = row * width + x;
+                for (&p, &q) in a[start..start + N].iter().zip(&b[start..start + N]) {
+                    let (p, q) = (p as u64, q as u64);
+                    sa += p;
+                    sb += q;
+                    saa += p * p;
+                    sbb += q * q;
+                    sab += p * q;
+                }
+            }
+            let n = (N * N) as f64;
+            let (ma, mb) = (sa as f64 / n, sb as f64 / n);
+            let va = saa as f64 / n - ma * ma;
+            let vb = sbb as f64 / n - mb * mb;
+            let cov = sab as f64 / n - ma * mb;
+            total += ((2.0 * ma * mb + C1) * (2.0 * cov + C2))
+                / ((ma * ma + mb * mb + C1) * (va + vb + C2));
+            count += 1;
+        }
+    }
+    total / count as f64
 }
 
 /// A hidden working folder next to the destination for the passes of one
@@ -537,6 +639,40 @@ mod tests {
     fn an_encoder_error_ends_the_fit() {
         let result = fit_size(2_000_000, 1_600_000, |_, _| Err("kaputt".to_string()));
         assert_eq!(result, Err("kaputt".to_string()));
+    }
+
+    #[test]
+    fn identical_pictures_score_one() {
+        let a: Vec<u8> = (0..64 * 48).map(|i| (i * 7 % 251) as u8).collect();
+        assert!((ssim(&a, &a, 64, 48) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn noise_scores_lower_than_a_slight_shift_in_brightness() {
+        let a: Vec<u8> = (0..64 * 48).map(|i| (i * 7 % 251) as u8).collect();
+        let brighter: Vec<u8> = a.iter().map(|&p| p.saturating_add(2)).collect();
+        let noisy: Vec<u8> = a
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| p.wrapping_add(((i * 31) % 41) as u8))
+            .collect();
+        let s_bright = ssim(&a, &brighter, 64, 48);
+        let s_noisy = ssim(&a, &noisy, 64, 48);
+        assert!(s_bright > 0.99, "{s_bright}");
+        assert!(s_noisy < s_bright, "{s_noisy} >= {s_bright}");
+    }
+
+    #[test]
+    fn samples_sit_inside_output_frames_and_inside_the_clip() {
+        let times = sample_times(10.0, 30.0, 60.0);
+        assert_eq!(times.len(), SSIM_SAMPLES);
+        for t in &times {
+            assert!(*t < 10.0);
+            // Just after a 30 fps frame start, before the next 60 fps frame.
+            let into_frame = t * 30.0 - (t * 30.0).floor();
+            assert!(into_frame > 0.0 && into_frame < 0.5, "{t}");
+        }
+        assert!(times.windows(2).all(|w| w[0] < w[1]));
     }
 
     #[test]

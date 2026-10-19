@@ -118,6 +118,29 @@ fn shrinks_to_the_size_target_at_30_fps_without_sound() {
         "{:?}",
         leftovers(dir.path())
     );
+
+    let ssim = file.ssim.expect("keine SSIM gemessen");
+    let worst = file.ssim_worst.unwrap();
+    assert!(worst <= ssim && ssim < 1.0, "{worst} / {ssim}");
+    assert_eq!(file.soft, ssim < video::SOFT_SSIM);
+}
+
+/// VideoToolbox has a floor: this clip does not go below ~240 KB at 1280
+/// px, whatever bitrate it is asked for (measured: 120 and 100 kbit/s both
+/// gave 239 949 bytes). A target under that is reported as missed — not
+/// met by quietly shrinking the picture.
+#[test]
+fn a_target_below_the_encoders_floor_is_reported_as_missed() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = fixture_copy(dir.path(), MOVING);
+    let tight = VideoSettings {
+        max_bytes: 60_000,
+        ..SMALL
+    };
+    let file = only(&run(&[source], "zu-knapp", &tight)).clone();
+    assert!(file.limit_missed, "{:?}", file.attempts);
+    assert!(file.bytes > 60_000);
+    assert_eq!((file.width, file.height), (1280, 720));
 }
 
 #[test]

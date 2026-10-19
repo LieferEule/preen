@@ -81,10 +81,17 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
     let image = unsafe { source.thumbnail_at_index(index, Some(options.as_opaque())) }
         .ok_or_else(|| "nicht dekodierbar".to_string())?;
 
-    let width = CGImage::width(Some(&image));
-    let height = CGImage::height(Some(&image));
+    bitmap_from_image(&image)
+}
+
+/// Draws a CGImage into 8-bit sRGB RGBA, alpha premultiplied — the colour
+/// management step every decoded picture goes through, images and video
+/// frames alike.
+pub(crate) fn bitmap_from_image(image: &CGImage) -> Result<Bitmap, String> {
+    let width = CGImage::width(Some(image));
+    let height = CGImage::height(Some(image));
     let channel = !matches!(
-        CGImage::alpha_info(Some(&image)),
+        CGImage::alpha_info(Some(image)),
         CGImageAlphaInfo::None | CGImageAlphaInfo::NoneSkipLast | CGImageAlphaInfo::NoneSkipFirst
     );
 
@@ -109,7 +116,7 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
         CGPoint::new(0.0, 0.0),
         CGSize::new(width as f64, height as f64),
     );
-    CGContext::draw_image(Some(&context), rect, Some(&image));
+    CGContext::draw_image(Some(&context), rect, Some(image));
     drop(context);
 
     // One pass over the drawn pixels decides it: an alpha channel that is
@@ -123,6 +130,45 @@ fn decode_capped(path: &Path, max_pixels: Option<u32>) -> Result<Bitmap, String>
         pixels,
         has_alpha,
     })
+}
+
+/// Luma of a CGImage at exactly `width`×`height`, the way a video stores it:
+/// BT.709 weights on the gamma-encoded values, video range (16–235). That is
+/// the Y plane ffmpeg's `ssim` filter compares, so the numbers line up.
+pub fn luma_from_image(image: &CGImage, width: u32, height: u32) -> Result<Vec<u8>, String> {
+    // Both pictures are read as plain sRGB numbers, whatever their tags say.
+    // An untagged source next to a BT.709-tagged result would otherwise be
+    // colour-managed differently, and SSIM would count that as loss.
+    let srgb = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }))
+        .ok_or_else(|| "sRGB-Farbraum nicht verfügbar".to_string())?;
+    let retagged = CGImage::new_copy_with_color_space(Some(image), Some(&srgb));
+    let image = retagged.as_deref().unwrap_or(image);
+
+    let (w, h) = (width as usize, height as usize);
+    let mut pixels = vec![0u8; w * h * 4];
+    let context = unsafe {
+        CGBitmapContextCreate(
+            pixels.as_mut_ptr() as *mut c_void,
+            w,
+            h,
+            8,
+            w * 4,
+            Some(&srgb),
+            CGImageAlphaInfo::NoneSkipLast.0,
+        )
+    }
+    .ok_or_else(|| "Bildpuffer konnte nicht angelegt werden".to_string())?;
+    CGContext::set_interpolation_quality(Some(&context), CGInterpolationQuality::High);
+    let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(w as f64, h as f64));
+    CGContext::draw_image(Some(&context), rect, Some(image));
+    drop(context);
+    Ok(pixels
+        .chunks_exact(4)
+        .map(|p| {
+            let y = 0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64;
+            (16.0 + y * 219.0 / 255.0).round() as u8
+        })
+        .collect())
 }
 
 fn open(path: &Path) -> Result<CFRetained<CGImageSource>, String> {
